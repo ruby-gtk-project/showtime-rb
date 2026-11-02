@@ -1,3 +1,16 @@
 # frozen_string_literal: true
 
+require_relative "showtime/translations"
+require_relative "showtime/settings"
+require_relative "showtime/utils"
+require_relative "showtime/style"
+require_relative "showtime/icons"
+require_relative "showtime/primary_menu"
+require_relative "showtime/drag_overlay"
+require_relative "showtime/sound_options"
+require_relative "showtime/options"
+require_relative "showtime/restore_overlay"
+require_relative "showtime/placeholder_page"
+require_relative "showtime/shortcuts_dialog"
+require_relative "showtime/about_dialog"
 require_relative "showtime/application"
