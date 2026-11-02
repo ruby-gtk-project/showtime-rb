@@ -11,15 +11,39 @@ both halves of each pair.
 
 ## What exists on `ruby` today
 
-| File | What it is |
-|---|---|
-| `lib/showtime.rb` | one `require_relative` |
-| `lib/showtime/application.rb` | placeholder: `Gtk::Application`, `Adwaita::ApplicationWindow`, `Adwaita::ToolbarView`, `Adwaita::HeaderBar`, one `Adwaita::StatusPage` saying "The Ruby port has not been written yet." |
-| `lib/showtime/rb/version.rb` | gem version |
-| `exe/showtime` | `Showtime::Application.new.build.run` |
+Re-checked at `b272875` (after "Port the translations, settings, stylesheet,
+icons, helpers and placeholder UI").
 
-So: **nothing user-facing is ported.** Of 18 components below, one
-(`application.rb`) exists as a stub and 17 do not exist at all.
+| File | Lines | What it is |
+|---|---:|---|
+| `lib/showtime.rb` | 16 | requires every component below |
+| `lib/showtime/translations.rb` | 316 | translation layer |
+| `lib/showtime/settings.rb` | 119 | the three `…State` keys + playback history |
+| `lib/showtime/utils.rb` | 178 | timestamp / title / screenshot helpers |
+| `lib/showtime/style.rb` | 224 | the stylesheet as a `Gtk::CssProvider` |
+| `lib/showtime/icons.rb` | 63 | the 8 app-shipped symbolic icons |
+| `lib/showtime/primary_menu.rb` | 63 | the 6-item menu model |
+| `lib/showtime/drag_overlay.rb` | 73 | drop-target overlay (built, not yet mounted) |
+| `lib/showtime/sound_options.rb` | 174 | volume popover (built, not yet mounted) |
+| `lib/showtime/options.rb` | 392 | playback-options popover (built, not yet mounted) |
+| `lib/showtime/restore_overlay.rb` | 185 | resume/restart prompt (built, not yet mounted) |
+| `lib/showtime/placeholder_page.rb` | 175 | welcome / error / missing-plugin states |
+| `lib/showtime/shortcuts_dialog.rb` | 72 | the 4-section shortcuts dialog |
+| `lib/showtime/about_dialog.rb` | 101 | About |
+| `lib/showtime/application.rb` | 145 | the app singleton — **partial** (see component 1) |
+| `lib/showtime/rb/version.rb` | 13 | gem version |
+| `exe/showtime` | 6 | `Showtime::Application.new.build.run` |
+
+So of the 18 components below, **14 exist** and **4 do not**:
+`window.rb` (3), `video_page.rb` (5), `play.rb` (12), `mpris.rb` (14).
+
+The four that are missing are exactly the video half of the app. Everything the
+port shows today is the placeholder page: `application.rb` stands in for the
+window shell, mounts `PlaceholderPage` under a `Adwaita::ToastOverlay` in a
+`Gtk::Stack`, and creates only 3 `app.*` and 3 `win.*` actions of upstream's 24.
+Four components (7, 8, 9, 6 — the two popovers, the drag overlay and the restore
+overlay) are written and conform to the house style but are reachable from
+nothing, because the widget that would mount them is the unported video page.
 
 The port is namespaced (`module Showtime`, `lib/showtime/*.rb`) because the
 branch is already packaged as a gem, so the house rule "one upstream source file
@@ -37,7 +61,7 @@ branch is already packaged as a gem, so the house rule "one upstream source file
 
 ## Components, in the order a user meets them
 
-### 1. `showtime/main.py` (+ `showtime/__init__.py.in`) → `lib/showtime/application.rb` — the application singleton — **exists as a stub**
+### 1. `showtime/main.py` (+ `showtime/__init__.py.in`) → `lib/showtime/application.rb` — the application singleton — **exists, partial**
 
 | Widget / object | × | CSS | Signals | Notes |
 |---|---:|---|---|---|
@@ -53,9 +77,18 @@ dialog). Signals it re-emits for MPRIS: `media-info-updated`, `state-changed`,
 entries, sha256 of the URI), `is-maximized` binding, rotating log file,
 `Gst.init()`.
 
-Gap: everything above. The stub has no actions, no accels, no open handling.
+Gap: `application.rb` sets the dark colour scheme, loads the stylesheet and the
+icons, and creates `app.quit`, `app.new-window`, `app.shortcuts` plus
+`win.close-window`, `win.about`, `win.toggle-fullscreen` — 6 of upstream's 24
+actions. Still missing: `HANDLES_OPEN` and `do_open` for file arguments, the
+`--new-window` / `-n` CLI option and `[VIDEO FILES]` parameter string, one window
+per video (`new-window` currently re-activates the single window), the idle
+inhibitor, the `playback_history.json` position history, the rotating log file
+feeding the About dialog's debug info, `Gst.init()`, and the five signals it
+re-emits for MPRIS. It also owns the window shell directly, which is component 3's
+job once that exists.
 
-### 2. `showtime/gtk/window.blp` (`menu primary_menu`) → `lib/showtime/primary_menu.rb` — the main menu — **missing**
+### 2. `showtime/gtk/window.blp` (`menu primary_menu`) → `lib/showtime/primary_menu.rb` — the main menu — **exists**
 
 | Item | Action | Notes |
 |---|---|---|
@@ -114,7 +147,7 @@ Note: upstream keeps the whole window tree in one 1200-line `.py` plus one
 `window.rb` as the shell (window, stack, toast overlay, actions, dialogs,
 GStreamer wiring).
 
-### 4. `showtime/gtk/window.blp` (`placeholder_page`) → `lib/showtime/placeholder_page.rb` — the no-video / error states — **missing**
+### 4. `showtime/gtk/window.blp` (`placeholder_page`) → `lib/showtime/placeholder_page.rb` — the no-video / error states — **exists**
 
 | Widget | × | CSS | Signals | Notes |
 |---|---:|---|---|---|
@@ -166,7 +199,7 @@ an idle timeout; the window resizes itself to the video (40% of screen area, 80%
 on screens ≤ 1280×1024); rotation via `Gtk.Picture` transform; `do_size_allocate`
 override.
 
-### 6. `showtime/gtk/window.blp` (`restore_breakpoint_bin`) → `lib/showtime/restore_overlay.rb` — resume-or-restart prompt — **missing**
+### 6. `showtime/gtk/window.blp` (`restore_breakpoint_bin`) → `lib/showtime/restore_overlay.rb` — resume-or-restart prompt — **exists, not mounted**
 
 | Widget | × | CSS | Signals | Notes |
 |---|---:|---|---|---|
@@ -177,7 +210,7 @@ override.
 | `Gtk.Label` | 2 | `overlaid` | — | "Resume", "Start Again" |
 | `Adw.Breakpoint` | 2 | — | — | ≤320×720 hides both labels; ≥320px high switches both buttons to 126×120 vertical |
 
-### 7. `showtime/widgets/sound_options.py` + `showtime/gtk/sound-options.blp` → `lib/showtime/sound_options.rb` — volume popover — **missing**
+### 7. `showtime/widgets/sound_options.py` + `showtime/gtk/sound-options.blp` → `lib/showtime/sound_options.rb` — volume popover — **exists, not mounted**
 
 | Widget | × | CSS | Signals | Notes |
 |---|---:|---|---|---|
@@ -187,7 +220,7 @@ override.
 | `Gtk.ToggleButton` | 1 | `circular`, `flat` | `active` ⇄ `mute` | `audio-volume-muted-symbolic`, a11y "Mute/Unmute" |
 | `Gtk.Scale` | 1 | — | `notify::value` → `_schedule_volume_change` | adjustment 0–1, step 0.2 |
 
-### 8. `showtime/widgets/options.py` + `showtime/gtk/options.blp` → `lib/showtime/options.rb` — playback options popover — **missing**
+### 8. `showtime/widgets/options.py` + `showtime/gtk/options.blp` → `lib/showtime/options.rb` — playback options popover — **exists, not mounted**
 
 | Widget | × | CSS | Signals / actions | Notes |
 |---|---:|---|---|---|
@@ -210,7 +243,7 @@ none; the subtitles menu gets "None" (`MAXUINT16`), one item per subtitle stream
 ("Undetermined Language" fallback), then "Add Subtitle File…" →
 `win.choose-subtitles`.
 
-### 9. `showtime/widgets/drag_overlay.py` → `lib/showtime/drag_overlay.rb` — drop target overlay — **missing**
+### 9. `showtime/widgets/drag_overlay.py` → `lib/showtime/drag_overlay.rb` — drop target overlay — **exists, not mounted**
 
 | Widget | × | CSS | Signals | Notes |
 |---|---:|---|---|---|
@@ -223,7 +256,7 @@ none; the subtitles menu gets "None" (`MAXUINT16`), one item per subtitle stream
 
 Taken from Loupe upstream; the port writes it from scratch.
 
-### 10. `showtime/gtk/shortcuts-dialog.blp` → `lib/showtime/shortcuts_dialog.rb` — keyboard shortcuts — **missing**
+### 10. `showtime/gtk/shortcuts-dialog.blp` → `lib/showtime/shortcuts_dialog.rb` — keyboard shortcuts — **exists**
 
 Standalone blueprint object with no backing source file, so it is its own unit.
 `Adw.ShortcutsDialog` with 4 `Adw.ShortcutsSection`s and 15 `Adw.ShortcutsItem`s:
@@ -237,7 +270,7 @@ In the Ruby bindings `Adwaita::ShortcutsItem.new` takes its title and accelerato
 **positionally**; items whose accelerator comes from an action name have to be
 given the accelerator this port actually binds.
 
-### 11. `showtime/widgets/window.py` (`_present_about_dialog`) + `data/org.gnome.Showtime.metainfo.xml.in` → `lib/showtime/about_dialog.rb` — About — **missing**
+### 11. `showtime/widgets/window.py` (`_present_about_dialog`) + `data/org.gnome.Showtime.metainfo.xml.in` → `lib/showtime/about_dialog.rb` — About — **exists**
 
 `Adw.AboutDialog.new_from_appdata`, developer "kramo", designers Tobias Bernard,
 Allan Day, kramo, copyright "© 2024-2025 kramo", `translator-credits`, debug info
@@ -254,7 +287,7 @@ subtitle font description tracking `gtk-xft-dpi` and the qtdemux unknown-fourcc
 filter. Everything the video page shows is driven from here, so it is a hard
 prerequisite, not an optional extra.
 
-### 13. `showtime/utils.py` → `lib/showtime/utils.rb` — helpers — **missing**
+### 13. `showtime/utils.py` → `lib/showtime/utils.rb` — helpers — **exists**
 
 `screenshot` (paintable → `Gdk.Texture` via `Gtk.Snapshot` and `Graphene.Rect`),
 `nanoseconds_to_timestamp` (`1:23` / `1:23:45` / forced `01:23:45`), `get_title`
@@ -269,7 +302,7 @@ volume and playback-status properties. Taken from GNOME Music upstream. Not
 user-visible inside the window, but it is what makes the system media controls
 work, so it is part of parity.
 
-### 15. `showtime/gtk/style.css` → `lib/showtime/style.rb` — the stylesheet — **missing**
+### 15. `showtime/gtk/style.css` → `lib/showtime/style.rb` — the stylesheet — **exists**
 
 Must ship as a `Gtk::CssProvider` loaded from a string, since the port has no
 GResource. Defines the classes the widget tables above reference and nothing else
@@ -280,14 +313,14 @@ names `video-page`, `play-button`, `backwards-button`, `forwards-button`,
 block. Dropping this file is how the port ends up a grey copy: the overlay
 buttons lose their drop shadows and the video scrim disappears.
 
-### 16. `data/org.gnome.Showtime.gschema.xml.in` → `lib/showtime/settings.rb` — persisted state — **missing**
+### 16. `data/org.gnome.Showtime.gschema.xml.in` → `lib/showtime/settings.rb` — persisted state — **exists**
 
 Schema `…State`: `end-timestamp-type` (enum Duration/Remaining), `is-maximized` (b),
 `looping` (b). The port needs a settings store with the same three keys plus the
 playback-position history file (`playback_history.json`, max 1000 entries) that
 `main.py` keeps beside it.
 
-### 17. `data/icons/scalable/actions/*.svg` + `showtime/showtime.gresource.xml.in` → `lib/showtime/icons.rb` — app-shipped icons — **missing**
+### 17. `data/icons/scalable/actions/*.svg` + `showtime/showtime.gresource.xml.in` → `lib/showtime/icons.rb` — app-shipped icons — **exists**
 
 8 symbolic icons that are **not** in the system theme and are referenced by name
 from the widget tables above: `settings-symbolic`, `puzzle-piece-symbolic`,
@@ -296,7 +329,7 @@ from the widget tables above: `settings-symbolic`, `puzzle-piece-symbolic`,
 inline `Gtk::IconTheme` resources) the play controls, the options button and the
 missing-plugin page all render as broken-image icons.
 
-### 18. `po/` (57 locales, `po/POTFILES.in`) → `lib/showtime/translations.rb` — translations — **missing**
+### 18. `po/` (57 locales, `po/POTFILES.in`) → `lib/showtime/translations.rb` — translations — **exists**
 
 Upstream marks its strings with `_()` / `ngettext()` across the 4 blueprint files
 and 4 Python files listed in `POTFILES.in`. The port currently has no translation
@@ -311,6 +344,7 @@ layer at all; see the `translation-parity` skill before deciding the shape.
 ## Blockers for the port steps that follow
 
 1. **GStreamer.** Components 5, 12 and 14 need `gstreamer`, `gst-play`, `gst-pbutils`, `gst-audio` typelibs and the `gtk4paintablesink` element in the dev shell. Nothing on the video page can be driven without them, and the fork's `flake.nix` has not been checked for them.
-2. **No GResource.** Upstream loads its blueprint, CSS and icons from a compiled resource bundle. The port builds widgets in Ruby, so the stylesheet (15) and the icons (17) each need a loading mechanism that upstream never had to write.
+2. ~~**No GResource.**~~ Resolved: `style.rb` loads the stylesheet from a string through `Gtk::CssProvider` and `icons.rb` adds a search path, so components 15 and 17 are done.
 3. **Blueprint property bindings.** `icon-name: bind $_get_play_icon(template.paused)`, `bind template.mute bidirectional` and `Adw.ToggleGroup.active-name` bound to `rate` have no declarative equivalent in Ruby; each becomes an explicit `notify::` connection, and the bidirectional ones need loop guards.
 4. **MPRIS** (14) is hand-written D-Bus XML in upstream; the Ruby bindings' D-Bus story needs checking before that component is scheduled.
+5. **Mounting order.** Components 6, 7, 8 and 9 are written but reachable from nothing. They stay dead until component 3 (`window.rb`) and component 5 (`video_page.rb`) exist, so those two are the next units and nothing else should be started before them.
