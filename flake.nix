@@ -72,12 +72,40 @@
           xorgproto
         ]);
 
+        # GStreamer. `lib/showtime/play.rb` drives the pipeline through the
+        # Gst, GstPbutils and GstPlay typelibs: Gst core carries the first,
+        # gst-plugins-base the second, gst-plugins-bad the third. The element
+        # that renders a video frame into a Gtk::Picture — gtk4paintablesink —
+        # is a Rust plugin and only lives in gst-plugins-rs; good, bad and
+        # libav are the decoders an actual video file needs.
+        gstStack = with pkgs.gst_all_1; [
+          gstreamer
+          gst-plugins-base
+          gst-plugins-good
+          gst-plugins-bad
+          gst-plugins-rs
+          gst-libav
+        ]
+        # Same `Requires.private` rule as gtk4 above: gstreamer-1.0.pc pulls
+        # these in transitively and the pkg-config gem hard-fails on any .pc
+        # it cannot find.
+        ++ (with pkgs; [
+          libunwind
+          orc
+          elfutils
+        ]);
+
+        # GStreamer scans this for plugins; without it `gtk4paintablesink`
+        # cannot be made and the video page has nothing to show.
+        gstPluginPath = pkgs.lib.makeSearchPath "lib/gstreamer-1.0"
+          (map (drv: drv.out or drv) gstStack);
+
         # ruby-gnome gems build C extensions with extconf.rb + the pkg-config
         # gem; nixpkgs only ships gemConfig entries for the GTK3-era subset, so
         # the GTK4 gems get their build inputs declared here.
         rubyGnomeGem = _attrs: {
           nativeBuildInputs = [ pkgs.pkg-config ];
-          buildInputs = gtkStack;
+          buildInputs = gtkStack ++ gstStack;
         };
 
         gemConfig = pkgs.defaultGemConfig // {
@@ -87,13 +115,14 @@
           graphene1 = rubyGnomeGem;
           adwaita = rubyGnomeGem;
           rsvg2 = rubyGnomeGem;
+          gstreamer = rubyGnomeGem;
         };
 
         # `makeSearchPath` would take each package's *first* output, and glib's
         # first output is `bin`, which carries no typelibs — hence the explicit
         # `.out`. at-spi2-core is here for the Atk typelib.
         typelibPath = pkgs.lib.makeSearchPath "lib/girepository-1.0"
-          (map (drv: drv.out or drv) (gtkStack ++ [ pkgs.at-spi2-core ]));
+          (map (drv: drv.out or drv) (gtkStack ++ gstStack ++ [ pkgs.at-spi2-core ]));
 
         # nix/ and not the repo root: the root Gemfile is kettle-jem's
         # development bundle — rubocop, rspec, yard, the kettle-dev stack — and
@@ -129,7 +158,7 @@
           # the wrapper never looks. The wrapper below is built by hand and
           # points at both the pre- and post-move paths.
           nativeBuildInputs = [ pkgs.makeWrapper ];
-          buildInputs = [ gems ] ++ gtkStack;
+          buildInputs = [ gems ] ++ gtkStack ++ gstStack;
 
           dontBuild = true;
 
@@ -160,6 +189,7 @@
               --add-flags "-I$out/share/showtime/lib" \
               --add-flags "$out/share/showtime/exe/${launcher}" \
               --set GI_TYPELIB_PATH "${typelibPath}" \
+              --set GST_PLUGIN_SYSTEM_PATH_1_0 "${gstPluginPath}" \
               --prefix XDG_DATA_DIRS : "$out/share" \
               --prefix XDG_DATA_DIRS : "$out/share/gsettings-schemas/showtime-0.1.0" \
               --prefix XDG_DATA_DIRS : "${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}" \
@@ -201,13 +231,14 @@
             pkgs.xvfb-run
             pkgs.gsettings-desktop-schemas
             pkgs.adwaita-icon-theme
-          ] ++ gtkStack;
+          ] ++ gtkStack ++ gstStack;
 
           # Icons, GSettings schemas and the GTK portal all resolve through
           # XDG_DATA_DIRS; without these the window opens with blank icons.
           shellHook = ''
             export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}:${pkgs.adwaita-icon-theme}/share:$XDG_DATA_DIRS"
             export GI_TYPELIB_PATH="${typelibPath}''${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
+            export GST_PLUGIN_SYSTEM_PATH_1_0="${gstPluginPath}"
             export RUBYLIB="$PWD/lib''${RUBYLIB:+:$RUBYLIB}"
             [ -d data/schemas ] && export GSETTINGS_SCHEMA_DIR="$PWD/data/schemas"
             unset BUNDLE_GEMFILE BUNDLE_FROZEN

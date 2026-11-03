@@ -35,6 +35,8 @@ GEM
     gsk4 (4.3.9)
       gdk4 (= 4.3.9)
       graphene1 (= 4.3.9)
+    gstreamer (4.3.9)
+      gobject-introspection (= 4.3.9)
     gtk4 (4.3.9)
       atk (= 4.3.9)
       gdk4 (= 4.3.9)
@@ -57,6 +59,7 @@ PLATFORMS
 
 DEPENDENCIES
   adwaita
+  gstreamer (= 4.3.9)
   gtk4
 
 BUNDLED WITH

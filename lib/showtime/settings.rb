@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "digest"
 require "json"
 require "fileutils"
 
@@ -68,6 +69,36 @@ module Showtime
       listener
     end
 
+    # The play-position history upstream's main.py keeps beside the schema, in
+    # `playback_history.json` under the state directory: the position in
+    # nanoseconds of every video the app has played, keyed by the sha256 digest
+    # of its URI, oldest entry dropped once the file holds more than
+    # MAX_HISTORY_ITEMS of them.
+    #
+    # It is what makes the video page's resume-or-restart prompt appear:
+    # `Window#play_video` reads the position back and only offers to resume
+    # when there is one and it is more than a minute in.
+    MAX_HISTORY_ITEMS = 1000
+
+    HISTORY_FILE = "playback_history.json"
+
+    def play_position(uri)
+      digest = Digest::SHA256.hexdigest(uri.to_s)
+      history[digest]
+    end
+
+    def save_play_position(uri, position)
+      unless uri.to_s.empty?
+        history[Digest::SHA256.hexdigest(uri.to_s)] = position
+        trim_history
+        write_history
+      end
+    end
+
+    def history_location = @history_location ||= File.join(File.dirname(@path), HISTORY_FILE)
+
+    def history = @history ||= read_history
+
     # Named accessors for every key, so callers do not repeat the strings.
     DEFAULTS.each_key do |key|
       method_name = key.tr("-", "_")
@@ -114,6 +145,36 @@ module Showtime
       def write
         FileUtils.mkdir_p(File.dirname(@path))
         File.write(@path, "#{JSON.pretty_generate(@values)}\n")
+      end
+
+      def read_history
+        if File.exist?(history_location)
+          parse_history(File.read(history_location))
+        else
+          {}
+        end
+      end
+
+      def parse_history(text)
+        parsed = JSON.parse(text)
+        if parsed.is_a?(Hash)
+          parsed
+        else
+          {}
+        end
+      rescue JSON::ParserError
+        {}
+      end
+
+      # Ruby hashes keep insertion order, so the first key is the oldest
+      # entry — the same thing upstream's `next(iter(hist))` picks.
+      def trim_history
+        [history.size - MAX_HISTORY_ITEMS, 0].max.times { history.delete(history.first.first) }
+      end
+
+      def write_history
+        FileUtils.mkdir_p(File.dirname(history_location))
+        File.write(history_location, "#{JSON.generate(history)}\n")
       end
   end
 end
