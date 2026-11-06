@@ -11,14 +11,15 @@ both halves of each pair.
 
 ## What exists on `ruby` today
 
-Re-checked at `b272875` (after "Port the translations, settings, stylesheet,
-icons, helpers and placeholder UI").
+Re-checked at `b499202` ("Port components written during an interrupted run",
+on top of "Inventory upstream components" and "Port the translations,
+settings, stylesheet, icons, helpers and placeholder UI").
 
 | File | Lines | What it is |
 |---|---:|---|
-| `lib/showtime.rb` | 16 | requires every component below |
+| `lib/showtime.rb` | 15 | requires every component below except `play.rb`/`video_page.rb` (not wired in) |
 | `lib/showtime/translations.rb` | 316 | translation layer |
-| `lib/showtime/settings.rb` | 119 | the three `…State` keys + playback history |
+| `lib/showtime/settings.rb` | 180 | the three `…State` keys + `playback_history.json` position history |
 | `lib/showtime/utils.rb` | 178 | timestamp / title / screenshot helpers |
 | `lib/showtime/style.rb` | 224 | the stylesheet as a `Gtk::CssProvider` |
 | `lib/showtime/icons.rb` | 63 | the 8 app-shipped symbolic icons |
@@ -28,22 +29,27 @@ icons, helpers and placeholder UI").
 | `lib/showtime/options.rb` | 392 | playback-options popover (built, not yet mounted) |
 | `lib/showtime/restore_overlay.rb` | 185 | resume/restart prompt (built, not yet mounted) |
 | `lib/showtime/placeholder_page.rb` | 175 | welcome / error / missing-plugin states |
+| `lib/showtime/video_page.rb` | 576 | player + overlays — **written, unverified, not `require_relative`'d** |
+| `lib/showtime/play.rb` | 418 | GStreamer pipeline/bus — **written, unverified, not `require_relative`'d** |
 | `lib/showtime/shortcuts_dialog.rb` | 72 | the 4-section shortcuts dialog |
 | `lib/showtime/about_dialog.rb` | 101 | About |
 | `lib/showtime/application.rb` | 145 | the app singleton — **partial** (see component 1) |
 | `lib/showtime/rb/version.rb` | 13 | gem version |
 | `exe/showtime` | 6 | `Showtime::Application.new.build.run` |
 
-So of the 18 components below, **14 exist** and **4 do not**:
-`window.rb` (3), `video_page.rb` (5), `play.rb` (12), `mpris.rb` (14).
+So of the 18 components below, **16 exist as files** and **2 do not**:
+`window.rb` (3) and `mpris.rb` (14) are still missing outright. `video_page.rb`
+(5) and `play.rb` (12) now exist — added by a run that was interrupted before
+its parity audit or drive script, so they parse but have never been loaded or
+driven, and `lib/showtime.rb` does not `require_relative` either of them yet.
 
-The four that are missing are exactly the video half of the app. Everything the
-port shows today is the placeholder page: `application.rb` stands in for the
-window shell, mounts `PlaceholderPage` under a `Adwaita::ToastOverlay` in a
-`Gtk::Stack`, and creates only 3 `app.*` and 3 `win.*` actions of upstream's 24.
-Four components (7, 8, 9, 6 — the two popovers, the drag overlay and the restore
-overlay) are written and conform to the house style but are reachable from
-nothing, because the widget that would mount them is the unported video page.
+Everything the port actually *shows* today is still the placeholder page:
+`application.rb` stands in for the window shell, mounts `PlaceholderPage` under
+a `Adwaita::ToastOverlay` in a `Gtk::Stack`, and creates only 3 `app.*` and 3
+`win.*` actions of upstream's 24. Six components (7, 8, 9, 6, 5, 12 — the two
+popovers, the drag overlay, the restore overlay, the video page and the
+GStreamer layer) are written but reachable from nothing, because the window
+shell that would require and mount them (component 3) does not exist.
 
 The port is namespaced (`module Showtime`, `lib/showtime/*.rb`) because the
 branch is already packaged as a gem, so the house rule "one upstream source file
@@ -170,7 +176,7 @@ missing-plugin descriptions: `"{}" codecs are required to play this video`,
 plus `The "{}" codecs required to play this video could not be found` when
 installation is unsupported. Toasts: "Details copied", "Installing…".
 
-### 5. `showtime/gtk/window.blp` (`video_page`) → `lib/showtime/video_page.rb` — the player and its overlays — **missing**
+### 5. `showtime/gtk/window.blp` (`video_page`) → `lib/showtime/video_page.rb` — the player and its overlays — **written, unverified, not mounted**
 
 | Widget | × | CSS | Signals / actions | Notes |
 |---|---:|---|---|---|
@@ -277,7 +283,7 @@ Allan Day, kramo, copyright "© 2024-2025 kramo", `translator-credits`, debug in
 read from the rotating log file with `debug_info_filename` set. The port has no
 GResource, so it builds the dialog's fields directly rather than from appdata.
 
-### 12. `showtime/play.py` → `lib/showtime/play.rb` — GStreamer pipeline and bus — **missing**
+### 12. `showtime/play.py` → `lib/showtime/play.rb` — GStreamer pipeline and bus — **written, unverified, not required**
 
 Not a widget: `gtk4paintablesink` (optionally wrapped in `glsinkbin`), `GstPlay.Play`,
 and a `Messenger` GObject re-emitting 10 bus signals (`state-changed`,
@@ -316,9 +322,10 @@ buttons lose their drop shadows and the video scrim disappears.
 ### 16. `data/org.gnome.Showtime.gschema.xml.in` → `lib/showtime/settings.rb` — persisted state — **exists**
 
 Schema `…State`: `end-timestamp-type` (enum Duration/Remaining), `is-maximized` (b),
-`looping` (b). The port needs a settings store with the same three keys plus the
-playback-position history file (`playback_history.json`, max 1000 entries) that
-`main.py` keeps beside it.
+`looping` (b). `settings.rb` now also carries the playback-position history file
+(`playback_history.json`, sha256-of-URI keys, 1000-entry cap) that `main.py`
+keeps beside the schema; `play_position`/`save_play_position` are what the
+restore-overlay prompt (component 6) would read once it is wired to a window.
 
 ### 17. `data/icons/scalable/actions/*.svg` + `showtime/showtime.gresource.xml.in` → `lib/showtime/icons.rb` — app-shipped icons — **exists**
 
@@ -343,8 +350,8 @@ layer at all; see the `translation-parity` skill before deciding the shape.
 
 ## Blockers for the port steps that follow
 
-1. **GStreamer.** Components 5, 12 and 14 need `gstreamer`, `gst-play`, `gst-pbutils`, `gst-audio` typelibs and the `gtk4paintablesink` element in the dev shell. Nothing on the video page can be driven without them, and the fork's `flake.nix` has not been checked for them.
+1. **GStreamer.** Components 5, 12 and 14 need `gstreamer`, `gst-play`, `gst-pbutils`, `gst-audio` typelibs and the `gtk4paintablesink` element in the dev shell; `flake.nix` gained GStreamer-related changes in the same commit that added `play.rb`/`video_page.rb` (`b499202`), but neither file has been loaded under `nix develop` / `xvfb-run` yet, so whether the dev shell actually provides them is unverified.
 2. ~~**No GResource.**~~ Resolved: `style.rb` loads the stylesheet from a string through `Gtk::CssProvider` and `icons.rb` adds a search path, so components 15 and 17 are done.
-3. **Blueprint property bindings.** `icon-name: bind $_get_play_icon(template.paused)`, `bind template.mute bidirectional` and `Adw.ToggleGroup.active-name` bound to `rate` have no declarative equivalent in Ruby; each becomes an explicit `notify::` connection, and the bidirectional ones need loop guards.
+3. **Blueprint property bindings.** `icon-name: bind $_get_play_icon(template.paused)`, `bind template.mute bidirectional` and `Adw.ToggleGroup.active-name` bound to `rate` have no declarative equivalent in Ruby; each becomes an explicit `notify::` connection, and the bidirectional ones need loop guards. `video_page.rb` exists now and should be checked against this when it is driven.
 4. **MPRIS** (14) is hand-written D-Bus XML in upstream; the Ruby bindings' D-Bus story needs checking before that component is scheduled.
-5. **Mounting order.** Components 6, 7, 8 and 9 are written but reachable from nothing. They stay dead until component 3 (`window.rb`) and component 5 (`video_page.rb`) exist, so those two are the next units and nothing else should be started before them.
+5. **Mounting order.** Components 5, 6, 7, 8, 9 and 12 are written but reachable from nothing, and `play.rb`/`video_page.rb` are not even `require_relative`'d from `lib/showtime.rb`. They stay dead until component 3 (`window.rb`) exists to require and mount them, so `window.rb` is the next unit, and `play.rb`/`video_page.rb` need to be loaded and driven (never just `ruby -c`'d) before anything is reported done.
