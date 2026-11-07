@@ -145,8 +145,8 @@ module Showtime
 
       def missing_plugin_rows(on_install, on_try_anyway)
         [
-          on_install && [Translations.translate("Install Plugin"), on_install, "suggested-action"],
-          on_try_anyway && [Translations.translate("Try Anyway"), on_try_anyway, nil],
+          on_install && [Translations.translate("Install Plugin"), on_install, "suggested-action", true],
+          on_try_anyway && [Translations.translate("Try Anyway"), on_try_anyway, nil, false],
         ].compact
       end
 
@@ -158,17 +158,28 @@ module Showtime
           group.halign = :center
           group.width_request = 250
           group.separate_rows = true
-          rows.each { |title, callback, css| group.add(button_row(title, callback, css)) }
+          rows.each do |title, callback, css, disable_on_activate|
+            group.add(button_row(title, callback, css, disable_on_activate: disable_on_activate))
+          end
         end
       end
 
-      def button_row(title, callback, css)
+      # `disable_on_activate` is the install-plugin row's own behaviour:
+      # upstream's `install.props.sensitive = False`, set the moment the row
+      # is activated so a second click can't start a second install while
+      # the first is still in flight.
+      def button_row(title, callback, css, disable_on_activate: false)
         Adwaita::ButtonRow.new.tap do |row|
           row.title = title
           if css
             row.add_css_class(css)
           end
-          row.signal_connect("activated") { callback&.call }
+          row.signal_connect("activated") do
+            if disable_on_activate
+              row.sensitive = false
+            end
+            callback&.call
+          end
         end
       end
   end

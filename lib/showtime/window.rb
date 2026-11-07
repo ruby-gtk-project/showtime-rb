@@ -27,13 +27,17 @@ module Showtime
   # exposes — this class supplies every callback VideoPage's constructor takes
   # and every one PlaceholderPage's `show_error` / `show_missing_plugin` take.
   #
-  # Two upstream behaviours are intentionally not ported, each noted at its
-  # call site below: the PackageKit-backed "Install Plugin" button (no
-  # installer exists to drive in this environment, so the missing-plugin page
-  # always shows the "could not be found" wording); and opening a second
-  # window to retry a failed stream (`_try_again` just replays the file in
-  # this window). Session inhibition (upstream's `app.inhibit_win` /
-  # `uninhibit_win`) is ported directly on `Gtk::Application`, below.
+  # One upstream behaviour is not yet built here: upstream's `do_activate`
+  # constructs a brand-new `Window` on every call, which is what makes
+  # `new-window`, each CLI file argument, and a failed stream's "try again"
+  # (`_try_again` calls `do_activate` then closes the old window) all open a
+  # second OS window. This port's `Window` is a single instance, memoized per
+  # `Application`, so `try_again` below just replays the file in this same
+  # window instead of opening another one. Nothing in `ruby-gnome` stops the
+  # multi-window architecture from being built; it is simply not done yet —
+  # see `.reports/accountability-ensurance.md`. Session inhibition (upstream's
+  # `app.inhibit_win` / `uninhibit_win`) is ported directly on
+  # `Gtk::Application`, below.
   class Window
     # From upstream's window.blp template: a 16:9 aspect ratio at the minimum
     # height, and 360px wide, which is what the metainfo file requires.
@@ -433,10 +437,11 @@ module Showtime
         end
       end
 
-      # Upstream offers to install the missing codec through PackageKit. No
-      # installer is driven here, so the page always falls back to its
-      # "could not be found" wording (`on_install: nil` is a real, complete
-      # branch of PlaceholderPage#show_missing_plugin, not a stub).
+      # Upstream's `_on_missing_plugin`: offers to install the missing codec
+      # through PackageKit (`GstPbutils.install_plugins_supported`/
+      # `install_plugins_async`) whenever this system has an installer to
+      # drive; `install_plugin`/`on_install_done` below are the port of that
+      # button's two halves.
       def on_missing_plugin(message)
         unless @already_shown_missing_plugin
           @already_shown_missing_plugin = true
@@ -446,12 +451,45 @@ module Showtime
           end
 
           description = GstPbutils.missing_plugin_message_get_description(message).to_s
+          installer_detail = GstPbutils.missing_plugin_message_get_installer_detail(message)
           placeholder_page.show_missing_plugin(
             description:,
-            on_install:    nil,
+            on_install:    install_callback(installer_detail),
             on_try_anyway: partially_missing ? -> { try_anyway } : nil,
           )
           stack.visible_child = placeholder_page.toolbar_view
+        end
+      end
+
+      def install_callback(installer_detail)
+        if GstPbutils.install_plugins_supported
+          -> { install_plugin(installer_detail) }
+        end
+      end
+
+      # Upstream's `install_plugin`: kicks off the async install, with an
+      # "Installing…" toast while it runs. The button that triggered this is
+      # disabled by `PlaceholderPage` itself the moment it is activated.
+      def install_plugin(installer_detail)
+        toast_overlay.add_toast(Adwaita::Toast.new(Translations.translate("Installing…")))
+        details = installer_detail ? [installer_detail] : []
+        GstPbutils.install_plugins_async(details, nil) { |result| on_install_done(result) }
+      end
+
+      # Upstream's `on_install_done`: only acts if the missing-plugin page is
+      # still the one showing (the user may have navigated away, or closed
+      # the window, while the install ran in the background).
+      def on_install_done(result)
+        if stack.visible_child == placeholder_page.toolbar_view && placeholder_page.showing_missing_plugin?
+          case result
+          when GstPbutils::InstallPluginsReturn::SUCCESS
+            Gst.update_registry
+            try_again
+          when GstPbutils::InstallPluginsReturn::NOT_FOUND
+            placeholder_page.plugin_not_found
+          else
+            placeholder_page.plugin_install_failed
+          end
         end
       end
 
