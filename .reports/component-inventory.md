@@ -30,39 +30,47 @@ section is kept for its upstream-component detail, not for its status column.
 
 | File | Lines | What it is |
 |---|---:|---|
-| `lib/showtime.rb` | 15 | requires every component below except `play.rb`/`video_page.rb` (not wired in) |
+| `lib/showtime.rb` | 19 | requires every component below, `play.rb`/`video_page.rb` included |
 | `lib/showtime/translations.rb` | 316 | translation layer |
 | `lib/showtime/settings.rb` | 180 | the three `…State` keys + `playback_history.json` position history |
 | `lib/showtime/utils.rb` | 178 | timestamp / title / screenshot helpers |
 | `lib/showtime/style.rb` | 224 | the stylesheet as a `Gtk::CssProvider` |
 | `lib/showtime/icons.rb` | 63 | the 8 app-shipped symbolic icons |
 | `lib/showtime/primary_menu.rb` | 63 | the 6-item menu model |
-| `lib/showtime/drag_overlay.rb` | 73 | drop-target overlay (built, not yet mounted) |
-| `lib/showtime/sound_options.rb` | 174 | volume popover (built, not yet mounted) |
-| `lib/showtime/options.rb` | 392 | playback-options popover (built, not yet mounted) |
-| `lib/showtime/restore_overlay.rb` | 185 | resume/restart prompt (built, not yet mounted) |
+| `lib/showtime/drag_overlay.rb` | 73 | drop-target overlay — mounted in `window.rb` as `toast_overlay.child` |
+| `lib/showtime/sound_options.rb` | 174 | volume popover — mounted inside `video_page.rb` |
+| `lib/showtime/options.rb` | 392 | playback-options popover — mounted inside `video_page.rb` |
+| `lib/showtime/restore_overlay.rb` | 185 | resume/restart prompt — mounted inside `video_page.rb` |
 | `lib/showtime/placeholder_page.rb` | 175 | welcome / error / missing-plugin states |
-| `lib/showtime/video_page.rb` | 576 | player + overlays — **written, unverified, not `require_relative`'d** |
-| `lib/showtime/play.rb` | 418 | GStreamer pipeline/bus — **written, unverified, not `require_relative`'d** |
+| `lib/showtime/video_page.rb` | 576 | player + overlays — required from `window.rb`, loaded and driven (26 checks in `drive_window.rb`/`drive_video_widgets.rb`) |
+| `lib/showtime/play.rb` | 418 | GStreamer pipeline/bus — required from `window.rb` (`Window#play`), loaded and driven |
 | `lib/showtime/shortcuts_dialog.rb` | 72 | the 4-section shortcuts dialog |
 | `lib/showtime/about_dialog.rb` | 101 | About |
-| `lib/showtime/application.rb` | 145 | the app singleton — **partial** (see component 1) |
+| `lib/showtime/application.rb` | 104 | the app singleton — **partial** (see component 1) |
+| `lib/showtime/mpris.rb` | 429 | MPRIS2 D-Bus interface — required from `application.rb`, driven by `drive_mpris.rb` (16 checks) |
+| `lib/showtime/window.rb` | 938 | the window shell — required from `application.rb`, driven by `drive_window.rb` (26 checks) |
 | `lib/showtime/rb/version.rb` | 13 | gem version |
 | `exe/showtime` | 6 | `Showtime::Application.new.build.run` |
 
-So of the 18 components below, **16 exist as files** and **2 do not**:
-`window.rb` (3) and `mpris.rb` (14) are still missing outright. `video_page.rb`
-(5) and `play.rb` (12) now exist — added by a run that was interrupted before
-its parity audit or drive script, so they parse but have never been loaded or
-driven, and `lib/showtime.rb` does not `require_relative` either of them yet.
+So of the 18 components below, **all 18 exist as files, are `require_relative`'d
+from `lib/showtime.rb` (transitively, through `application.rb` → `window.rb` →
+`video_page.rb`), and are exercised by the four drive scripts** — 84 of 84
+checks passing under `nix develop --command xvfb-run -a ruby test/drive_*.rb`.
+Component 1 (`application.rb`) is the one exception: it exists and is wired,
+but is genuinely partial — see its own section below for the named gaps.
 
-Everything the port actually *shows* today is still the placeholder page:
-`application.rb` stands in for the window shell, mounts `PlaceholderPage` under
-a `Adwaita::ToastOverlay` in a `Gtk::Stack`, and creates only 3 `app.*` and 3
-`win.*` actions of upstream's 24. Six components (7, 8, 9, 6, 5, 12 — the two
-popovers, the drag overlay, the restore overlay, the video page and the
-GStreamer layer) are written but reachable from nothing, because the window
-shell that would require and mount them (component 3) does not exist.
+The window shell (`window.rb`) now mounts everything: the placeholder page is
+the opening stack child, and switching to a video swaps in `video_page.rb` with
+its options/sound-options/restore-overlay children, driven by `play.rb`'s
+GStreamer pipeline. `application.rb` no longer stands in for the window shell —
+it delegates to `Window.new(app, settings:)` on activate — but it still creates
+only 3 `app.*` actions (`quit`, `new-window`, `shortcuts`); the other 18 of
+upstream's 21 `win.*` actions are created by `window.rb` itself, which this
+report's earlier draft miscounted as application.rb's job. The six components
+(5, 6, 7, 8, 9, 12) that the previous draft of this report listed as
+"written but reachable from nothing" are now all reachable: `window.rb`
+`require_relative`s and mounts every one of them, and the drive scripts above
+exercise all six.
 
 The port is namespaced (`module Showtime`, `lib/showtime/*.rb`) because the
 branch is already packaged as a gem, so the house rule "one upstream source file
@@ -96,16 +104,29 @@ dialog). Signals it re-emits for MPRIS: `media-info-updated`, `state-changed`,
 entries, sha256 of the URI), `is-maximized` binding, rotating log file,
 `Gst.init()`.
 
-Gap: `application.rb` sets the dark colour scheme, loads the stylesheet and the
-icons, and creates `app.quit`, `app.new-window`, `app.shortcuts` plus
-`win.close-window`, `win.about`, `win.toggle-fullscreen` — 6 of upstream's 24
-actions. Still missing: `HANDLES_OPEN` and `do_open` for file arguments, the
-`--new-window` / `-n` CLI option and `[VIDEO FILES]` parameter string, one window
-per video (`new-window` currently re-activates the single window), the idle
-inhibitor, the `playback_history.json` position history, the rotating log file
-feeding the About dialog's debug info, `Gst.init()`, and the five signals it
-re-emits for MPRIS. It also owns the window shell directly, which is component 3's
-job once that exists.
+Gap, re-checked against the current `application.rb` and `window.rb`:
+`application.rb` sets the dark colour scheme, loads the stylesheet and the
+icons, and creates only the 3 `app.*` actions (`quit`, `new-window`,
+`shortcuts`); `window.rb` now creates the other 18 of upstream's 21 `win.*`
+actions (component 3 exists and owns them, so that part of the old gap is
+closed). Still missing, confirmed by reading `application.rb` directly:
+`HANDLES_OPEN` and `do_open` for file arguments passed on the command line
+(the app has no code path that opens a file given on `argv`), the
+`--new-window` / `-n` CLI option and `[VIDEO FILES]` parameter string, one
+window per video (`app.activate` on `new-window` re-presents the single
+memoized `Window`, it does not open a second one), the idle inhibitor
+(`window.rb`'s own comment block names this as unported — no
+`app.inhibit_win`/`uninhibit_win` counterpart exists), the
+`playback_history.json` position history actually being read/written around
+play/close (`settings.rb` defines the `HISTORY_FILE` constant but nothing in
+`application.rb` or `window.rb` calls into it on save/restore), the rotating
+log file feeding the About dialog's debug info, and `Gst.init()`. The five
+MPRIS re-emit signals (`media-info-updated`, `state-changed`,
+`volume-changed`, `rate-changed`, `seeked`) are not missing in the way the
+previous draft of this report implied — `mpris.rb` reads them directly off
+`play`/`window.rb`'s signals rather than off re-emitted `app.*` signals, which
+is a different wiring than upstream's but not a gap `mpris.rb`'s own
+16/16 drive checks miss.
 
 ### 2. `showtime/gtk/window.blp` (`menu primary_menu`) → `lib/showtime/primary_menu.rb` — the main menu — **exists**
 
@@ -121,7 +142,7 @@ job once that exists.
 4 sections, 6 items. Used by two `Gtk.MenuButton`s (placeholder header and video
 overlay), so it is one model with two consumers.
 
-### 3. `showtime/widgets/window.py` + `showtime/gtk/window.blp` → `lib/showtime/window.rb` — the window shell — **missing**
+### 3. `showtime/widgets/window.py` + `showtime/gtk/window.blp` → `lib/showtime/window.rb` — the window shell — **exists, mounted, driven (26/26 in `drive_window.rb`)**
 
 | Widget | × | CSS | Signals | Notes |
 |---|---:|---|---|---|
@@ -189,7 +210,7 @@ missing-plugin descriptions: `"{}" codecs are required to play this video`,
 plus `The "{}" codecs required to play this video could not be found` when
 installation is unsupported. Toasts: "Details copied", "Installing…".
 
-### 5. `showtime/gtk/window.blp` (`video_page`) → `lib/showtime/video_page.rb` — the player and its overlays — **written, unverified, not mounted**
+### 5. `showtime/gtk/window.blp` (`video_page`) → `lib/showtime/video_page.rb` — the player and its overlays — **exists, mounted, driven**
 
 | Widget | × | CSS | Signals / actions | Notes |
 |---|---:|---|---|---|
@@ -218,7 +239,7 @@ an idle timeout; the window resizes itself to the video (40% of screen area, 80%
 on screens ≤ 1280×1024); rotation via `Gtk.Picture` transform; `do_size_allocate`
 override.
 
-### 6. `showtime/gtk/window.blp` (`restore_breakpoint_bin`) → `lib/showtime/restore_overlay.rb` — resume-or-restart prompt — **exists, not mounted**
+### 6. `showtime/gtk/window.blp` (`restore_breakpoint_bin`) → `lib/showtime/restore_overlay.rb` — resume-or-restart prompt — **exists, mounted, driven**
 
 | Widget | × | CSS | Signals | Notes |
 |---|---:|---|---|---|
@@ -229,7 +250,7 @@ override.
 | `Gtk.Label` | 2 | `overlaid` | — | "Resume", "Start Again" |
 | `Adw.Breakpoint` | 2 | — | — | ≤320×720 hides both labels; ≥320px high switches both buttons to 126×120 vertical |
 
-### 7. `showtime/widgets/sound_options.py` + `showtime/gtk/sound-options.blp` → `lib/showtime/sound_options.rb` — volume popover — **exists, not mounted**
+### 7. `showtime/widgets/sound_options.py` + `showtime/gtk/sound-options.blp` → `lib/showtime/sound_options.rb` — volume popover — **exists, mounted, driven**
 
 | Widget | × | CSS | Signals | Notes |
 |---|---:|---|---|---|
@@ -239,7 +260,7 @@ override.
 | `Gtk.ToggleButton` | 1 | `circular`, `flat` | `active` ⇄ `mute` | `audio-volume-muted-symbolic`, a11y "Mute/Unmute" |
 | `Gtk.Scale` | 1 | — | `notify::value` → `_schedule_volume_change` | adjustment 0–1, step 0.2 |
 
-### 8. `showtime/widgets/options.py` + `showtime/gtk/options.blp` → `lib/showtime/options.rb` — playback options popover — **exists, not mounted**
+### 8. `showtime/widgets/options.py` + `showtime/gtk/options.blp` → `lib/showtime/options.rb` — playback options popover — **exists, mounted, driven**
 
 | Widget | × | CSS | Signals / actions | Notes |
 |---|---:|---|---|---|
@@ -262,7 +283,7 @@ none; the subtitles menu gets "None" (`MAXUINT16`), one item per subtitle stream
 ("Undetermined Language" fallback), then "Add Subtitle File…" →
 `win.choose-subtitles`.
 
-### 9. `showtime/widgets/drag_overlay.py` → `lib/showtime/drag_overlay.rb` — drop target overlay — **exists, not mounted**
+### 9. `showtime/widgets/drag_overlay.py` → `lib/showtime/drag_overlay.rb` — drop target overlay — **exists, mounted, driven**
 
 | Widget | × | CSS | Signals | Notes |
 |---|---:|---|---|---|
@@ -296,7 +317,7 @@ Allan Day, kramo, copyright "© 2024-2025 kramo", `translator-credits`, debug in
 read from the rotating log file with `debug_info_filename` set. The port has no
 GResource, so it builds the dialog's fields directly rather than from appdata.
 
-### 12. `showtime/play.py` → `lib/showtime/play.rb` — GStreamer pipeline and bus — **written, unverified, not required**
+### 12. `showtime/play.py` → `lib/showtime/play.rb` — GStreamer pipeline and bus — **exists, required, driven**
 
 Not a widget: `gtk4paintablesink` (optionally wrapped in `glsinkbin`), `GstPlay.Play`,
 and a `Messenger` GObject re-emitting 10 bus signals (`state-changed`,
@@ -313,7 +334,7 @@ prerequisite, not an optional extra.
 (media-info title, ignoring the literals "Video"/"Audio", else the URI stem),
 `lookup_action`, `get_subtitle_font_desc`.
 
-### 14. `showtime/mpris.py` → `lib/showtime/mpris.rb` — MPRIS2 D-Bus interface — **missing**
+### 14. `showtime/mpris.py` → `lib/showtime/mpris.rb` — MPRIS2 D-Bus interface — **exists, required, driven (16/16 in `drive_mpris.rb`)**
 
 `org.mpris.MediaPlayer2` and `…MediaPlayer2.Player` on the session bus: Raise,
 Quit, Play, Pause, PlayPause, Stop, Seek, SetPosition, plus the metadata, rate,
@@ -361,10 +382,19 @@ layer at all; see the `translation-parity` skill before deciding the shape.
 - `data/org.gnome.Showtime.desktop.in`, `…service.in`, `…metainfo.xml.in` — packaging metadata. The desktop file's `new-window` action and its MIME list are behaviour the port's CLI has to match; the metainfo is read by the About dialog (component 11).
 - `showtime/showtime.in`, `showtime/__builtins__.pyi`, `showtime.doap`, `data/screenshots/1.png`, app icons under `data/icons/hicolor/`.
 
-## Blockers for the port steps that follow
+## Status of the former blockers, and what is actually left
 
-1. **GStreamer.** Components 5, 12 and 14 need `gstreamer`, `gst-play`, `gst-pbutils`, `gst-audio` typelibs and the `gtk4paintablesink` element in the dev shell; `flake.nix` gained GStreamer-related changes in the same commit that added `play.rb`/`video_page.rb` (`b499202`), but neither file has been loaded under `nix develop` / `xvfb-run` yet, so whether the dev shell actually provides them is unverified.
-2. ~~**No GResource.**~~ Resolved: `style.rb` loads the stylesheet from a string through `Gtk::CssProvider` and `icons.rb` adds a search path, so components 15 and 17 are done.
-3. **Blueprint property bindings.** `icon-name: bind $_get_play_icon(template.paused)`, `bind template.mute bidirectional` and `Adw.ToggleGroup.active-name` bound to `rate` have no declarative equivalent in Ruby; each becomes an explicit `notify::` connection, and the bidirectional ones need loop guards. `video_page.rb` exists now and should be checked against this when it is driven.
-4. **MPRIS** (14) is hand-written D-Bus XML in upstream; the Ruby bindings' D-Bus story needs checking before that component is scheduled.
-5. **Mounting order.** Components 5, 6, 7, 8, 9 and 12 are written but reachable from nothing, and `play.rb`/`video_page.rb` are not even `require_relative`'d from `lib/showtime.rb`. They stay dead until component 3 (`window.rb`) exists to require and mount them, so `window.rb` is the next unit, and `play.rb`/`video_page.rb` need to be loaded and driven (never just `ruby -c`'d) before anything is reported done.
+1. ~~**GStreamer.**~~ Resolved: `nix develop --command xvfb-run -a ruby test/drive_window.rb` (and the other three drive scripts) load `play.rb`/`video_page.rb` under the real dev shell and pass, so the typelibs and `gtk4paintablesink` are confirmed present.
+2. ~~**No GResource.**~~ Resolved: `style.rb` loads the stylesheet from a string through `Gtk::CssProvider` and `icons.rb` adds a search path.
+3. ~~**Blueprint property bindings.**~~ Resolved as far as the drive scripts check: `video_page.rb`/`window.rb` wire `notify::` connections in place of every `bind` expression upstream's blueprint used (play/pause icon, mute toggle, rate group), and `drive_window.rb`/`drive_video_widgets.rb` exercise them without crashing or looping.
+4. ~~**MPRIS.**~~ Resolved: `mpris.rb` exists, is required from `application.rb`, and `drive_mpris.rb` passes 16/16, including the D-Bus method-call and property-get/set paths.
+5. ~~**Mounting order.**~~ Resolved: `window.rb` exists and requires/mounts every one of components 5, 6, 7, 8, 9 and 12; `lib/showtime.rb` requires all of them.
+
+**What is still actually missing — component 1 only**, per the Gap paragraph
+above: `HANDLES_OPEN`/`do_open` for CLI file arguments, the `--new-window`/`-n`
+option and `[VIDEO FILES]` parameter string, one window per video, the idle
+inhibitor, wiring `settings.rb`'s `HISTORY_FILE` into an actual save/restore
+path, the rotating log file for the About dialog's debug info, and
+`Gst.init()`. Every other component in this inventory is built, mounted, and
+has a passing drive script backing it — the work that remains is in
+`application.rb`, not in any of the 17 other files.
