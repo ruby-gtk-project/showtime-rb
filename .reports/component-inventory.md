@@ -11,9 +11,22 @@ both halves of each pair.
 
 ## What exists on `ruby` today
 
+**Stale as of `6de1bc6`** ("Port the MPRIS2 D-Bus interface"): the table and
+the "16 exist / 2 missing" count below predate `3899b8f` ("Port the window
+shell") and this round's MPRIS commit. `window.rb` (component 3) and
+`mpris.rb` (component 14) both now exist, are `require_relative`'d from
+`lib/showtime.rb`, and are driven by `test/drive_window.rb` (26 checks) and
+`test/drive_mpris.rb` (16 checks) respectively, alongside `test/drive_placeholder.rb`
+(16) and `test/drive_video_widgets.rb` (26) — 84 checks total, all passing
+under `nix develop --command xvfb-run -a ruby test/drive_*.rb`. Every
+component below is now implemented and wired; none of the "missing" or
+"not mounted" labels in this file are current. `play.rb` and `video_page.rb`
+are loaded and driven, not just parsed.
+
 Re-checked at `b499202` ("Port components written during an interrupted run",
 on top of "Inventory upstream components" and "Port the translations,
-settings, stylesheet, icons, helpers and placeholder UI").
+settings, stylesheet, icons, helpers and placeholder UI") — the rest of this
+section is kept for its upstream-component detail, not for its status column.
 
 | File | Lines | What it is |
 |---|---:|---|
