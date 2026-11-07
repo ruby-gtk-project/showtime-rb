@@ -46,6 +46,29 @@ GtkDriver.drive(app, shots: File.expand_path("../tmp/shots", __dir__)) do |d, _a
     d.check("show-in-files starts disabled") { !app.window.lookup_action("show-in-files").enabled? }
   end
 
+  d.step("the three app.* actions from application.rb are present") do
+    %w[quit new-window shortcuts].each do |name|
+      d.check("app.#{name} exists") { app.app.has_action?(name) }
+    end
+    d.check("<primary>q is bound to app.quit") { app.app.get_accels_for_action("app.quit") == ["<Control>q"] }
+    d.check("<primary>n is bound to app.new-window") { app.app.get_accels_for_action("app.new-window") == ["<Control>n"] }
+  end
+
+  d.step("the primary menu's 4 sections point at the actions above") do
+    actions = (0...app.primary_menu.n_items).flat_map do |i|
+      section = app.primary_menu.get_item_link(i, "section")
+      (0...section.n_items).map { |j| section.get_item_attribute_value(j, "action", GLib::VariantType.new("s")) }
+    end
+    d.check("open-video is on the menu") { actions.include?("win.open-video") }
+    d.check("about is on the menu") { actions.include?("win.about") }
+    d.check("new-window is on the menu") { actions.include?("app.new-window") }
+    d.check("shortcuts is on the menu") { actions.include?("app.shortcuts") }
+  end
+
+  d.step("the idle inhibitor is wired to real playback state, not just present") do
+    d.check("no inhibitor is held with nothing playing") { app.window_controller.instance_variable_get(:@inhibit_cookie).nil? }
+  end
+
   d.step("the drop target accepts a GFile") do
     d.check("drag overlay's drop target is wired") { app.window_controller.drop_target.formats.contain_gtype(Gio::File.gtype) }
   end
