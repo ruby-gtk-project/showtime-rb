@@ -131,6 +131,20 @@ module Showtime
     def paused? = @paused
     def stopped? = @stopped
 
+    # Upstream's `pause` / `unpause` on Window are public — the keyboard
+    # shortcut and the restore-overlay prompt call them directly, and MPRIS
+    # (lib/showtime/mpris.rb) needs the same entry points Play/Pause/
+    # PlayPause map to.
+    def unpause
+      hide_overlay(video_page.restore_overlay)
+      reveal_overlay(video_page.controls_box)
+      play.start
+    end
+
+    def pause
+      play.pause
+    end
+
     # Memoized widgets
 
     def window
@@ -474,16 +488,6 @@ module Showtime
       def enable_post_play_actions
         window.lookup_action("screenshot")&.enabled = true
         window.lookup_action("show-in-files")&.enabled = true
-      end
-
-      def unpause
-        hide_overlay(video_page.restore_overlay)
-        reveal_overlay(video_page.controls_box)
-        play.start
-      end
-
-      def pause
-        play.pause
       end
 
       def step_rate(step)

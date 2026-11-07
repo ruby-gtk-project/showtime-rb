@@ -4,6 +4,7 @@ require "gtk4"
 require "adwaita"
 
 require_relative "icons"
+require_relative "mpris"
 require_relative "settings"
 require_relative "shortcuts_dialog"
 require_relative "style"
@@ -42,6 +43,7 @@ module Showtime
         app.signal_connect("activate") do
           window_controller.build
           window_controller.present
+          mpris.build
         end
       end
     end
@@ -54,13 +56,28 @@ module Showtime
 
     def window_controller = @window_controller ||= Window.new(app, settings: settings)
 
+    # The MPRIS2 D-Bus surface, ported from showtime/mpris.py. Built once the
+    # window exists, since every property and method it answers reads the
+    # window's playback state.
+    def mpris = @mpris ||= Mpris.new(self)
+
     # Delegated so existing callers (and this app's own tests) can keep
     # reaching the window and what it owns through the application, the way
-    # they could before `Window` existed.
+    # they could before `Window` existed. Also what Mpris talks to — it
+    # knows nothing about `Window` directly.
     def window = window_controller.window
     def placeholder_page = window_controller.placeholder_page
     def primary_menu = window_controller.primary_menu
     def about_dialog = window_controller.about_dialog
+    def play = window_controller.play
+    def paused? = window_controller.paused?
+    def stopped? = window_controller.stopped?
+    def pause = window_controller.pause
+    def unpause = window_controller.unpause
+    def rate = window_controller.video_page.options.rate
+    def rate=(value)
+      window_controller.video_page.options.rate = value
+    end
 
     def shortcuts_dialog = @shortcuts_dialog ||= ShortcutsDialog.new.build
 
