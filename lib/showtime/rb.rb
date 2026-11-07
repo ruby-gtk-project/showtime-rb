@@ -19,3 +19,4 @@ require_relative "rb/version"
 # nothing more, and the ones that drive widgets ask for "showtime" themselves.
 require_relative "translations"
 require_relative "settings"
+require_relative "log"

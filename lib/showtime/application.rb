@@ -4,10 +4,13 @@ require "gtk4"
 require "adwaita"
 
 require_relative "icons"
+require_relative "log"
 require_relative "mpris"
+require_relative "rb/version"
 require_relative "settings"
 require_relative "shortcuts_dialog"
 require_relative "style"
+require_relative "translations"
 require_relative "window"
 
 module Showtime
@@ -28,22 +31,39 @@ module Showtime
   # House style (see .claude/skills/ruby-gtk): every widget is a memoized
   # method, all configuration lives in its `tap`, assembly happens only in
   # `build`, and the launcher is one expression.
+  #
+  # Upstream's command-line handling (`do_handle_local_options`, `do_open`,
+  # the `--new-window`/`-n` option) is ported here too. `Gio::Application`'s
+  # `HANDLES_OPEN` flag is what routes `[VIDEO FILES]` arguments to the
+  # `open` signal instead of `activate`; `handle-local-options` is what makes
+  # a second, file-less invocation warn and exit instead of stealing focus
+  # from the window a `--new-window`-less `showtime` already opened.
   class Application
     APP_ID = "org.rubygtkproject.Showtime"
 
     def build
       app.tap do
         app.signal_connect("startup") do
+          Log.debug("Starting #{APP_ID} v#{Rb::VERSION}")
+          if defined?(Gst) && Gst.respond_to?(:version)
+            Log.debug("GStreamer version: #{Gst.version.join(".")}")
+          end
           Adwaita::StyleManager.default.color_scheme = :prefer_dark
           Style.load
           Icons.load
           create_app_actions
         end
 
+        app.signal_connect("handle-local-options") do |_app, options|
+          handle_local_options(options)
+        end
+
         app.signal_connect("activate") do
-          window_controller.build
-          window_controller.present
-          mpris.build
+          activate(nil)
+        end
+
+        app.signal_connect("open") do |_app, files, _n_files, _hint|
+          files.each { |file| activate(file) }
         end
       end
     end
@@ -52,7 +72,15 @@ module Showtime
 
     # Adwaita::Application is broken in the Ruby bindings; the application
     # object comes from Gtk and only the window is Adwaita.
-    def app = @app ||= Gtk::Application.new(APP_ID, :default_flags)
+    def app
+      @app ||= Gtk::Application.new(APP_ID, :handles_open).tap do |application|
+        application.add_main_option(
+          "new-window", "n", GLib::OptionFlags::NONE, GLib::OptionArg::NONE,
+          Translations.translate("Open the app with a new window"), nil,
+        )
+        application.set_option_context_parameter_string("[VIDEO FILES]")
+      end
+    end
 
     def window_controller = @window_controller ||= Window.new(app, settings: settings)
 
@@ -98,6 +126,43 @@ module Showtime
           unless accelerators.empty?
             app.set_accels_for_action("app.#{name}", accelerators)
           end
+        end
+      end
+
+      # Upstream's `do_activate`/`do_open`: build the window, play the given
+      # file (if any — a plain `activate` with no command-line arguments
+      # passes `nil`), present, and bring MPRIS up. `window_controller.build`
+      # and `mpris.build` are both idempotent, so this is safe to run once
+      # per launch or once per file the `open` signal hands it.
+      def activate(gfile)
+        window_controller.build
+        if gfile
+          window_controller.play_video_file(gfile)
+        end
+        window_controller.present
+        mpris.build
+      end
+
+      # Upstream's `do_handle_local_options`: `register` so `remote?` is
+      # answerable before the primary instance has necessarily started, then
+      # either hand off to the already-running instance (unless the person
+      # explicitly asked for `--new-window`, in which case `-1` lets the
+      # default remote-activation machinery continue) or, for the first
+      # instance, `-1` to continue into `do_startup`/`activate`/`open`.
+      def handle_local_options(options)
+        app.register
+        if app.remote?
+          if options.contains?("new-window")
+            -1
+          else
+            Log.warn(
+              "Showtime is already running. " \
+              "To open a new window, run the app with --new-window.",
+            )
+            0
+          end
+        else
+          -1
         end
       end
   end

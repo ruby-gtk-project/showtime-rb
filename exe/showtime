@@ -3,4 +3,4 @@
 
 require "showtime"
 
-Showtime::Application.new.build.run
+Showtime::Application.new.build.run([$PROGRAM_NAME] + ARGV)

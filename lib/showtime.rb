@@ -2,6 +2,7 @@
 
 require_relative "showtime/translations"
 require_relative "showtime/settings"
+require_relative "showtime/log"
 require_relative "showtime/utils"
 require_relative "showtime/style"
 require_relative "showtime/icons"

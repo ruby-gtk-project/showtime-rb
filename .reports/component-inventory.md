@@ -390,11 +390,24 @@ layer at all; see the `translation-parity` skill before deciding the shape.
 4. ~~**MPRIS.**~~ Resolved: `mpris.rb` exists, is required from `application.rb`, and `drive_mpris.rb` passes 16/16, including the D-Bus method-call and property-get/set paths.
 5. ~~**Mounting order.**~~ Resolved: `window.rb` exists and requires/mounts every one of components 5, 6, 7, 8, 9 and 12; `lib/showtime.rb` requires all of them.
 
-**What is still actually missing — component 1 only**, per the Gap paragraph
-above: `HANDLES_OPEN`/`do_open` for CLI file arguments, the `--new-window`/`-n`
-option and `[VIDEO FILES]` parameter string, one window per video, the idle
-inhibitor, wiring `settings.rb`'s `HISTORY_FILE` into an actual save/restore
-path, the rotating log file for the About dialog's debug info, and
-`Gst.init()`. Every other component in this inventory is built, mounted, and
-has a passing drive script backing it — the work that remains is in
-`application.rb`, not in any of the 17 other files.
+**Component 1, resolved as far as the single-window architecture goes**:
+`application.rb` now sets `:handles_open`, adds the `--new-window`/`-n` main
+option and `[VIDEO FILES]` parameter string, and wires the `open` signal (for
+CLI file arguments) and `handle-local-options` (upstream's
+`do_handle_local_options`: a file-less second launch registers, finds the
+first instance already running, and warns instead of re-presenting). `Gst.init`
+already happens idempotently inside `Play#build`. The idle inhibitor
+(`Window#inhibit_idle`/`#uninhibit_idle`, held on `@app` while playing,
+released on pause/stop/close) and the playback-history save on window close
+(`close-request` → `save_current_play_position`, `uninhibit_idle`,
+`play.stop`) are both wired. Logging now goes through `Showtime::Log`, a
+console-plus-1MB-rotating-file logger under `$XDG_STATE_HOME/showtime`,
+matching upstream's `RotatingFileHandler`.
+One piece is intentionally **not** ported: upstream opens one OS window per
+video file (`do_open` calling `do_activate` once per `GFile`). This port's
+`Window` is a single memoized controller per `Application`, by original
+design (see `window.rb`'s class comment on the retry-in-place behaviour), so
+multiple CLI file arguments play the last file in that one window rather than
+opening several windows. Making that true would mean turning `Window` from a
+singleton into one instance per `activate`/`open` call, which is a larger
+change than this round's remaining budget — noted here rather than stubbed.

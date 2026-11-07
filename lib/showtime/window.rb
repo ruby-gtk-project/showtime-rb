@@ -27,13 +27,13 @@ module Showtime
   # exposes — this class supplies every callback VideoPage's constructor takes
   # and every one PlaceholderPage's `show_error` / `show_missing_plugin` take.
   #
-  # Three upstream behaviours are intentionally not ported, each noted at its
+  # Two upstream behaviours are intentionally not ported, each noted at its
   # call site below: the PackageKit-backed "Install Plugin" button (no
   # installer exists to drive in this environment, so the missing-plugin page
-  # always shows the "could not be found" wording); session inhibition while
-  # playing (`app.inhibit_win` / `uninhibit_win`, which this port's
-  # Application has no counterpart for); and opening a second window to retry
-  # a failed stream (`_try_again` just replays the file in this window).
+  # always shows the "could not be found" wording); and opening a second
+  # window to retry a failed stream (`_try_again` just replays the file in
+  # this window). Session inhibition (upstream's `app.inhibit_win` /
+  # `uninhibit_win`) is ported directly on `Gtk::Application`, below.
   class Window
     # From upstream's window.blp template: a 16:9 aspect ratio at the minimum
     # height, and 360px wide, which is what the metainfo file requires.
@@ -108,6 +108,13 @@ module Showtime
           win.signal_connect("notify::maximized") do
             @settings.is_maximized = win.maximized?
           end
+
+          win.signal_connect("close-request") do
+            save_current_play_position
+            uninhibit_idle
+            play.stop
+            false
+          end
         end
 
         play.build
@@ -139,10 +146,50 @@ module Showtime
       hide_overlay(video_page.restore_overlay)
       reveal_overlay(video_page.controls_box)
       play.start
+      inhibit_idle
     end
 
     def pause
       play.pause
+      uninhibit_idle
+    end
+
+    # The public entry point `Application` uses to open a video file handed
+    # to the app on the command line (upstream's `win.play_video(gfile)`
+    # from `do_activate`/`do_open`). `play_video` itself stays private: every
+    # other caller reaches it through a widget signal already wired above.
+    def play_video_file(gfile)
+      build
+      play_video(gfile)
+    end
+
+    # Upstream's `app.inhibit_win(win)` / `app.uninhibit_win(win)`: an idle
+    # inhibitor held on `@app` for as long as a video is actually playing, so
+    # the session does not lock or sleep mid-playback. `Gtk::Application`
+    # (not `Showtime::Application`) is what `inhibit`/`uninhibit` live on, so
+    # this talks to `@app` directly rather than through a wrapper.
+    def inhibit_idle
+      unless @inhibit_cookie
+        cookie = @app.inhibit(
+          window,
+          Gtk::ApplicationInhibitFlags::IDLE,
+          Translations.translate("Playing a video"),
+        )
+        # A cookie of 0 means the inhibit failed (no session inhibitor is
+        # available, which is the normal case on this environment's
+        # headless/Xvfb display) — `Gtk::Application#uninhibit` asserts on
+        # that value, so it is never kept around to be passed back in.
+        if cookie.to_i.positive?
+          @inhibit_cookie = cookie
+        end
+      end
+    end
+
+    def uninhibit_idle
+      if @inhibit_cookie
+        @app.uninhibit(@inhibit_cookie)
+        @inhibit_cookie = nil
+      end
     end
 
     # Memoized widgets

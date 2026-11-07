@@ -165,6 +165,12 @@ module Showtime
       play.pause
     end
 
+    # Upstream's `win.play.stop()`, called when a window is removed/the app
+    # shuts down so the pipeline is not left running past the window it fed.
+    def stop
+      play.stop
+    end
+
     def seek(position)
       play.seek([position, 0].max)
     end
