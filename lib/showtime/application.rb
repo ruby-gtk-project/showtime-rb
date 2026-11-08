@@ -82,7 +82,14 @@ module Showtime
       end
     end
 
-    def window_controller = @window_controller ||= Window.new(app, settings: settings)
+    # The most recently built `Window` — what every delegate method below
+    # reaches through. Not memoized with `||=`: `activate` (upstream's
+    # `do_activate`) assigns a brand-new `Window` to `@window_controller` on
+    # every call, the same as upstream's unconditional `Window.new`, so
+    # `new-window`, each CLI file argument, and a retried file each get a
+    # real second `Gtk::Window` rather than replaying the one window this
+    # port used to keep for the app's whole lifetime.
+    def window_controller = @window_controller
 
     # The MPRIS2 D-Bus surface, ported from showtime/mpris.py. Built once the
     # window exists, since every property and method it answers reads the
@@ -129,18 +136,28 @@ module Showtime
         end
       end
 
-      # Upstream's `do_activate`/`do_open`: build the window, play the given
-      # file (if any — a plain `activate` with no command-line arguments
-      # passes `nil`), present, and bring MPRIS up. `window_controller.build`
-      # and `mpris.build` are both idempotent, so this is safe to run once
-      # per launch or once per file the `open` signal hands it.
+      # Upstream's `do_activate`/`do_open`: construct a new window, build it,
+      # play the given file (if any — a plain `activate` with no command-line
+      # arguments passes `nil`), present, and bring MPRIS up. A fresh `Window`
+      # on every call is what makes `new-window`, a second CLI file argument,
+      # and `Window#try_again`'s retry each open a real second `Gtk::Window`,
+      # matching upstream's own unconditional `Window.new` in `do_activate`.
       def activate(gfile)
+        @window_controller = Window.new(app, settings: settings, on_retry: ->(retry_gfile) { retry_in_new_window(retry_gfile) })
         window_controller.build
         if gfile
           window_controller.play_video_file(gfile)
         end
         window_controller.present
         mpris.build
+      end
+
+      # Upstream's `_try_again`: open the file in a brand-new window, then
+      # close the window that failed, once the new one is up.
+      def retry_in_new_window(gfile)
+        failed_controller = window_controller
+        activate(gfile)
+        failed_controller.window.close
       end
 
       # Upstream's `do_handle_local_options`: `register` so `remote?` is

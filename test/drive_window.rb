@@ -169,4 +169,25 @@ GtkDriver.drive(app, shots: File.expand_path("../tmp/shots", __dir__)) do |d, _a
     end
     d.shot("24-window-missing-plugin-install-failed")
   end
+
+  # Upstream's `do_activate` builds a brand-new `Window` on every call, so
+  # `new-window` opens a second OS window rather than re-presenting the one
+  # window a previous round of this port kept memoized for the app's whole
+  # lifetime. `app.app.activate` is exactly what `app.new-window`'s handler
+  # runs (application.rb's `create_app_actions`), and `app.app.windows` is
+  # `Gtk::Application`'s own list of every `Gtk::Window` it is tracking — a
+  # real second entry there, not just a second `Window` wrapper object, is
+  # what proves this actually opens a second OS window.
+  d.step("new-window opens a real second Gtk::Window") do
+    @windows_before = app.app.windows.size
+    @first_window_controller = app.window_controller
+    app.app.activate
+  end
+
+  d.step("a second window now exists alongside the first") do
+    d.check("Gtk::Application is tracking one more window") { app.app.windows.size == @windows_before + 1 }
+    d.check("the app's current window controller is a new instance") { app.window_controller != @first_window_controller }
+    d.check("the new window is a different Gtk::Window than the first") { app.window != @first_window_controller.window }
+    d.check("the first window is still open, not replaced") { app.app.windows.include?(@first_window_controller.window) }
+  end
 end

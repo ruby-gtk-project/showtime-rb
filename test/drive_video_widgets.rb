@@ -3,10 +3,12 @@
 # Drives the four widgets the video page is built from — the drag overlay, the
 # sound options popover, the options popover and the restore overlay.
 #
-# The window class that assembles them onto a playing video is not ported yet,
-# so this hosts them in a window of its own and exercises the behaviour each
-# one owns: the volume icon thresholds, the submenus built from a stream list,
-# the rate setter, the drop-target binding and the restore buttons.
+# `Window` (lib/showtime/window.rb) is what assembles these onto a playing
+# video in the real app, and is driven by its own file, test/drive_window.rb.
+# This file instead hosts the four widgets in a window of its own, so each one
+# is realized and can be driven and photographed in isolation: the volume icon
+# thresholds, the submenus built from a stream list, the rate setter, the
+# drop-target binding and the restore buttons.
 
 require "tmpdir"
 

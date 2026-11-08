@@ -27,15 +27,18 @@ module Showtime
   # exposes — this class supplies every callback VideoPage's constructor takes
   # and every one PlaceholderPage's `show_error` / `show_missing_plugin` take.
   #
-  # One upstream behaviour is not yet built here: upstream's `do_activate`
-  # constructs a brand-new `Window` on every call, which is what makes
-  # `new-window`, each CLI file argument, and a failed stream's "try again"
-  # (`_try_again` calls `do_activate` then closes the old window) all open a
-  # second OS window. This port's `Window` is a single instance, memoized per
-  # `Application`, so `try_again` below just replays the file in this same
-  # window instead of opening another one. Nothing in `ruby-gnome` stops the
-  # multi-window architecture from being built; it is simply not done yet —
-  # see `.reports/accountability-ensurance.md`. Session inhibition (upstream's
+  # Upstream's `do_activate` constructs a brand-new `Window` on every call,
+  # which is what makes `new-window`, each CLI file argument, and a failed
+  # stream's "try again" (`_try_again` calls `do_activate` then closes the old
+  # window) all open a second OS window. `Application#activate` (see
+  # application.rb) matches that: it builds a fresh `Window` instance on every
+  # call rather than reusing one. This class stays a single-window object —
+  # one `Gtk::Window`, one GStreamer pipeline, one stack of pages — and the
+  # multi-window behaviour comes from `Application` constructing several of
+  # these rather than from this class tracking more than one of anything.
+  # `try_again`, below, asks `Application` (via the `on_retry` callback given
+  # to `initialize`) to open the retried file in a new `Window` and close this
+  # one, exactly like upstream's `_try_again`. Session inhibition (upstream's
   # `app.inhibit_win` / `uninhibit_win`) is ported directly on
   # `Gtk::Application`, below.
   class Window
@@ -69,9 +72,10 @@ module Showtime
     # `GLib.MAXUINT16`, upstream's index for "no subtitles".
     NO_SUBTITLES = 65_535
 
-    def initialize(app, settings: Settings.new)
+    def initialize(app, settings: Settings.new, on_retry: nil)
       @app = app
       @settings = settings
+      @on_retry = on_retry
       @paused = true
       @stopped = true
       @buffering = false
@@ -428,12 +432,18 @@ module Showtime
         end
       end
 
-      # Upstream reopens the file in a brand new window and closes this one;
-      # this port has no multi-window `do_activate(gfile)` path, so it simply
-      # replays the same file here.
+      # Upstream's `_try_again`: reopens the file in a brand new window and
+      # closes this one. `@on_retry` is `Application#retry_in_new_window`,
+      # which builds the new `Window` and closes this one once it is up; with
+      # no retry handler (the standalone drivers construct `Window` directly),
+      # the file is just replayed in this same window instead.
       def try_again
         if @playing_gfile
-          play_video(@playing_gfile)
+          if @on_retry
+            @on_retry.call(@playing_gfile)
+          else
+            play_video(@playing_gfile)
+          end
         end
       end
 
