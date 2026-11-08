@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Ported from upstream's data/org.gnome.Showtime.gschema.xml.in. The port
+  itself reads and writes these same keys, defaults, types and enum nicks
+  through lib/showtime/settings.rb's small JSON file rather than through
+  compiled, installed GSettings (see that file's class comment for why) —
+  this schema is kept as the spec that JSON shim is ported from, and for a
+  packaged build that installs it for real.
+-->
+<schemalist gettext-domain="showtime">
+	<schema id="org.rubygtkproject.Showtime" path="/org/rubygtkproject/Showtime/">
+	</schema>
+	<enum id="org.rubygtkproject.Showtime.end-timestamp-types">
+		<value nick="Duration" value="0" />
+		<value nick="Remaining" value="1" />
+	</enum>
+	<schema id="org.rubygtkproject.Showtime.State" path="/org/rubygtkproject/Showtime/State/">
+		<key name="end-timestamp-type" enum="org.rubygtkproject.Showtime.end-timestamp-types">
+			<default>"Duration"</default>
+			<summary>What to show in the end timestamp position</summary>
+			<description>E.g. total duration of the video or the amount of time remaining</description>
+		</key>
+		<key name="is-maximized" type="b">
+			<default>false</default>
+		</key>
+		<key name="looping" type="b">
+			<default>false</default>
+		</key>
+	</schema>
+</schemalist>
