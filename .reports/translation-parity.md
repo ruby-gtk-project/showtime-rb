@@ -3,43 +3,55 @@
 | | |
 |---|---|
 | Upstream | `main` @ `f28a1d4` |
-| Port | `ruby` @ `47105ff` |
+| Port | `ruby` @ `e191199` |
 | Domain | `showtime` (upstream, from `po/meson.build`'s `bin_name`) — port has **no domain concept at all** (reads `.po` directly; no `.mo`, no `bindtextdomain`) |
 | Upstream messages | 77 (code: 67 across `showtime/**/*.py` + `showtime/gtk/*.blp`; `data/`: 10 from `desktop.in`/`metainfo.xml.in`/`gschema.xml.in`) |
-| Ported (by hand-census, see below) | 69 |
-| Gaps | 8, all from `data/` |
-| Extra (untranslated) | 2 (`Open the app with a new window`, `Translate`) — see note |
+| Ported (by hand-census, see below) | 70 |
+| Gaps | 7, all from `data/` |
+| Extra (untranslated) | 2 (`Open the app with a new window`, `Translate`) — unchanged, see note |
 | Upstream occurrences | 87 across 77 messages (9 reused), 1 unresolved (`ngettext(` with a variable msgid at `showtime/widgets/options.py:90`) |
 | Upstream languages | 57 `.po` files, 4,344 translated / 67 untranslated / 0 fuzzy |
 | Languages shipped by the port | **57/57** — `po/` copied verbatim, `LINGUAS` byte-identical, confirmed by `diff` |
-| Non-English string lookup verified on screen | **partial** — see "What was actually run" |
 
-**`catalogue.rb`'s automated scan of the port reports 0 messages and is wrong.**
-The port does not mark strings with `_()`/`N_()`/`ngettext()` — the markers
-this skill's scanner recognizes — it routes every user-visible string through
-`Showtime::Translations.translate(...)` / `.ngettext(...)`, a method call the
-scanner has no rule for. Per this skill's "When the scanner is the thing that
-is wrong" step, the fix (teaching the shared scanner a new marker name) is out
-of scope for this round, so the numbers above come from a **by-hand census**:
-`grep -rn 'Translations\.\(translate\|ngettext\)(' lib/ exe/`, followed by
-reading every one of the 63 call sites to resolve the ones whose argument is a
-local variable rather than a literal (`title`, `label`, `text`, `msgid`,
-`APPLICATION_NAME`, `DEVELOPER_NAME`, `COMMENTS`) back to the literal table
-each one is called from (`SECTIONS` in `shortcuts_dialog.rb` and
-`primary_menu.rb`, the `overlaid_label` call sites in `restore_overlay.rb`,
-the constants at the top of `about_dialog.rb`). **Report this scanner gap
-upstream to the skill** — it is specific to this port's choice of method name,
-not a one-off worth silently working around.
+**`catalogue.rb`'s automated scan of the port reports 0 messages and is still
+wrong**, for the same reason the last round recorded: the port routes every
+user-visible string through `Showtime::Translations.translate(...)` /
+`.ngettext(...)`, not `_()`/`N_()`/`ngettext()`, so this skill's scanner has
+no rule for it. Numbers in this report come from a by-hand census,
+re-run this round: `grep -rn 'Translations\.\(translate\|ngettext\)('
+lib/ exe/` now returns 64 call sites (up from 63 last round — one new site,
+see below), each read to resolve variable arguments back to their literal
+table.
 
-## The 8 real gaps — all `data/`
+## What changed since the last round: the "Installing…" gap is closed
 
-The port has **no `data/` directory at all** — no `.desktop.in`, no
-`.metainfo.xml.in`, no `.gschema.xml.in` — a fact already on record in
-`.reports/component-inventory.md` ("Not components" section) as a
-component-parity gap. It is also a translation gap, because those three files
-are three of this skill's non-code message sources and together own 10 of
-upstream's 77 messages (2 of the 10, `New Window` and `Video Player`, are
-already carried by other files the port does have, so they are not gaps):
+The previous round's census found **one genuine behavioural gap independent
+of the missing-`data/` cause**: `Installing…`
+(`showtime/widgets/window.py:838`) had no port site at all, because the
+install-plugin flow itself was not built. That flow is now built
+(`6f102ac`), and the toast is marked for translation at its real call site:
+
+```
+lib/showtime/window.rb:474:  toast_overlay.add_toast(Adwaita::Toast.new(Translations.translate("Installing…")))
+```
+
+Confirmed by reading the line directly, and confirmed the string survives
+byte-for-byte against upstream's `window.py:838` literal (`"Installing…"`,
+same ellipsis character, not three ASCII dots). This moves the ported count
+from 69 to 70 and removes the one gap that was not downstream of the
+missing-`data/` cause.
+
+## The 7 remaining gaps — all `data/`, and all still present
+
+Unchanged from the last round except for dropping the now-closed
+`Installing…` row. The port still has **no `data/` directory beyond the icon
+SVGs** — no `.desktop.in`, no `.metainfo.xml.in`, no `.gschema.xml.in` (this
+round re-confirmed with `find data -type f`, which lists only
+`data/icons/**/*.svg`). That is also a `component-parity` gap this round's
+`component-parity.md` names explicitly for the first time — see that report.
+These three files own 10 of upstream's 77 messages (2 of the 10, `New
+Window` and `Video Player`, are already carried by other files the port
+does have, so they are not gaps):
 
 | msgid | Upstream site | Port site |
 |---|---|---|
@@ -52,100 +64,63 @@ already carried by other files the port does have, so they are not gaps):
 | `What to show in the end timestamp position` | `data/org.gnome.Showtime.gschema.xml.in` | — |
 | `Play your favorite movies and video files without hassle. Video Player features` | `data/org.gnome.Showtime.metainfo.xml.in` | — |
 
-Plus one genuine behavioural gap, independent of the missing-`data/` cause:
-**`Installing…`** (`showtime/widgets/window.py:838`, the toast shown while a
-missing codec is being installed) has no port site at all. This is not a
-`data/` problem — it is the same gap `.reports/accountability-ensurance.md`
-records against `window.rb:30-36`: the port never built the install-plugin
-flow, so the toast that announces it has nothing to attach to.
+## What the hand-census confirms is actually ported (70 of 77)
 
-## What the hand-census confirms is actually ported (69 of 77)
+Re-verified this round, not merely carried forward:
 
-All of the following were checked by reading the call site, not by trusting
-the grep:
+- **`shortcuts_dialog.rb`'s `SECTIONS` table** — 19 strings via
+  `Translations.translate(title)`, matching
+  `showtime/gtk/shortcuts-dialog.blp` byte for byte.
+- **`primary_menu.rb`'s `SECTIONS` table** — 6 strings, mnemonics and
+  ellipsis intact.
+- **`restore_overlay.rb`** — `Resume`, `Start Again`.
+- **`about_dialog.rb`** — `translator-credits`, `Translate` (see "Extra"
+  below), `APPLICATION_NAME`/`DEVELOPER_NAME`/`COMMENTS`.
+- **`window.rb`** — toasts (including the now-ported `Installing…`),
+  file-dialog filter names, the `"{}" codecs...` pair.
+- Every other call site in `options.rb`, `sound_options.rb`, `video_page.rb`
+  matches its upstream msgid.
 
-- **`shortcuts_dialog.rb`'s `SECTIONS` table** carries 19 upstream strings
-  (4 section titles — `General`, `Volume`, `View`, `Playback` — and 15 item
-  titles) through `Translations.translate(title)` at lines 55 and 65. These
-  did not show up in a naive `grep` for `Translations.translate("...")`
-  because the argument is the loop variable, not a literal at the call site —
-  the literals live in the table two lines up. Read individually, all 19
-  match upstream's `showtime/gtk/shortcuts-dialog.blp` strings byte for byte.
-- **`primary_menu.rb`'s `SECTIONS` table**, same shape: `_New Window`,
-  `_Open…`, `Show in _Files`, `Take _Screenshot`, `_Keyboard Shortcuts`,
-  `_About Video Player` — all 6, mnemonics and ellipsis character intact.
-- **`restore_overlay.rb`**: `Resume` and `Start Again`, via
-  `overlaid_label(text)` → `Translations.translate(text)` (line 178).
-- **`about_dialog.rb`**: `translator-credits`, `Translate` (link label —
-  see below), plus `APPLICATION_NAME`/`DEVELOPER_NAME`/`COMMENTS` constants
-  resolved by reading the file; they hold the application name and developer
-  credit strings, carried as marked, translated lookups rather than bare
-  literals.
-- Every other call site listed by the `grep` in `lib/showtime/*.rb` (window
-  toasts, file-dialog filter names, the options popover's language/subtitle
-  submenus and rotate/speed labels, the sound-options tooltip, the video
-  page's button tooltips and the `“{}” codecs...` pair) matches its upstream
-  msgid, including the one with embedded curly double-quotes.
+## Extra: two port-only strings (unchanged)
 
-## Extra: two port-only strings
+- **`Open the app with a new window`** (`application.rb:79`) — upstream has
+  the identical string (`main.py:64`) but does not route it through gettext
+  either (it is a GLib `OptionEntry` description, localized by GLib's own
+  `--help` machinery, not `po/`). Not a regression.
+- **`Translate`** (`about_dialog.rb:81`) — one of libadwaita's own built-in
+  `Adw.AboutDialog.new_from_appdata` strings; the port builds the dialog by
+  hand and had to supply it itself. Not a regression.
 
-- **`Open the app with a new window`** — `application.rb:79`, the `--new-window`
-  CLI option's description. Upstream has the identical string at
-  `showtime/main.py:64` (`new_window.description = "Open the app with a new
-  window"`) but **does not mark it for translation** there either — it is a
-  GLib `OptionEntry` description, which GLib's own `--help` machinery
-  localizes separately from the app's `po/`. So this is not a message the
-  port invented; it is a message upstream has and does not route through
-  gettext, carried through the port's translation layer anyway. Harmless, and
-  arguably better than upstream, but it is outside the 77-message count on
-  both sides and is recorded here rather than silently folded into "ported".
-- **`Translate`** — `about_dialog.rb:81`, the About dialog's link-button
-  label. Upstream builds its About dialog with
-  `Adw.AboutDialog.new_from_appdata`, which supplies this label itself (it is
-  one of libadwaita's own built-in strings, translated by libadwaita's
-  catalogue, not the app's). The port builds the dialog by hand and had to
-  supply the label itself; routing it through `Translations.translate` is
-  consistent with the rest of the file but the string was never upstream's to
-  carry.
+## What was actually run (Step 5) — still only half
 
-Neither is a regression and neither is counted toward "ported" or "gap" in
-the 77-message total; both are listed because an extra string is an extra
-string and the rule is to say so.
-
-## What was actually run (Step 5)
+Re-run this round, same result as last round:
 
 ```
-nix develop --command ruby -e '
+nix develop --command xvfb-run -a ruby -e '
   $LOAD_PATH.unshift("lib"); require "showtime/translations"
   ENV["LANGUAGE"] = "de"; ENV["LC_ALL"] = "de_DE.UTF-8"
   puts Showtime::Translations.locale.inspect
   puts Showtime::Translations.translate("Watch Videos")
-  puts Showtime::Translations.translate("Open…")
+  puts Showtime::Translations.translate("Installing…")
 '
-# => "de"
-# => Videos ansehen
-# => Öffnen …
 ```
 
-This proves the lookup, plural-form parsing (`PLURAL_EXPRESSION`) and locale
-selection all work against the real, copied `po/de.po`. **It does not prove a
-widget shows German on screen** — that needs the app actually running headless
-under `LANGUAGE=de` with a screenshot, which this round did not do. Report
-that as the unrun half of Step 5, not as passed: the message-lookup layer is
-verified; the GTK label actually displaying the looked-up string is not.
+This proves lookup, plural-form parsing, and locale selection work against
+the real, copied `po/de.po`, including for the newly-ported `Installing…`
+string. **It still does not prove a widget shows German on screen** — no
+drive script runs the app under `LANGUAGE=de` and screenshots a widget. This
+is unchanged from the last round and is still the unrun half of Step 5, not
+a pass — see `.reports/test-parity.md`, which independently confirms no file
+in `test/` exercises `Translations` end-to-end either.
 
 ## Rules check against this skill
 
-- Byte-identical msgids: verified by hand for all 69 ported rows above; no
-  rewording found.
-- No `n/a`/`by design`: the 8 gaps and the `Installing…` gap are stated as
-  gaps, not waved off — the `data/`-absence cause is named, not used to close
-  the row.
-- Languages: 57/57, byte-identical `LINGUAS` and file set, confirmed by
-  `diff`, not by eyeballing a count.
-- Domain: does not match (`domain_matches: false` in the generated YAML is
-  correct) — the port has no domain at all, which costs it `msgfmt -c`
-  validation on the catalogue (nothing here ever compiles the `.po` files, so
-  a syntactically broken one would only be caught by `Translations` raising
-  at runtime, not by a build-time check). Recorded as an open item, not
-  resolved.
+- Byte-identical msgids: verified by hand for all 70 ported rows, including
+  the newly-ported `Installing…`.
+- No `n/a`/`by design`: the 7 `data/`-caused gaps are stated as gaps, with
+  the cause named, not used to close the row.
+- Languages: 57/57, byte-identical `LINGUAS` and file set, re-confirmed by
+  `diff` this round.
+- Domain: still does not match — the port has no domain at all. Unresolved,
+  recorded as an open item again rather than silently dropped because it
+  was already recorded once.

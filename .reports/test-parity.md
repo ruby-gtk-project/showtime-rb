@@ -3,60 +3,60 @@
 | | |
 |---|---|
 | Upstream | `main` @ `f28a1d4` |
-| Port | `ruby` @ `47105ff` |
+| Port | `ruby` @ `e191199` |
 | Upstream tests | 0 |
 | Ported | 0 |
 | Gaps | 0 |
 | Test command (documented) | `ruby -e 'require "rspec/core"; exit RSpec::Core::Runner.run([...])'` — printed by the dev-shell banner as "run the specs" |
 | Test command actually used | `nix develop --command xvfb-run -a ruby test/drive_*.rb` |
 
-Upstream has no test suite (verified: `find . -iname "*test*"` on
-`/tmp/wt/upstream` (origin/main @ `f28a1d4`) returns nothing, and a grep for
-`unittest|pytest|def test_` across `showtime/**/*.py` returns zero matches).
-Parity is **0/0 and is met trivially — the port inherits no safety net**. Every
-check below was written for the port and pins nothing upstream considered
-worth pinning.
+Upstream has no test suite (verified this round: `git ls-tree -r --name-only
+origin/main` lists nothing matching `test`, and the Python source has no
+`unittest`/`pytest`/`def test_` anywhere). Parity is **0/0 and is met
+trivially — the port inherits no safety net from upstream**. Every check
+below was written for the port and pins nothing upstream considered worth
+pinning.
 
-## The gate this round, run for real
+## The runtime gate, reproduced this round
 
 ```
 test/drive_mpris.rb            16 of 16 checks passed   DRIVE OK
 test/drive_placeholder.rb      16 of 16 checks passed   DRIVE OK
-test/drive_window.rb           36 of 36 checks passed   DRIVE OK
 test/drive_video_widgets.rb    26 of 26 checks passed   DRIVE OK
+test/drive_window.rb           41 of 41 checks passed   DRIVE OK
                                 ------------------------
-                                94 of 94 checks passed
+                                99 of 99 checks passed
 ```
 
-94 is the real number: it is the count of `check(...)` calls actually executed
-(`grep -c '\bcheck(' test/drive_*.rb` sums to 75 distinct call sites, several
-inside loops that execute more than once per run — e.g. `drive_video_widgets.rb`
-drives three audio-stream submenu rows and two subtitle rows in one `check`
-each — which is how 75 static call sites produce 94 runtime passes). This
-matches the runtime gate given for this round (`drive_ok=true`, 94/94, 18
-components) and was reproduced here, not taken on faith, under
-`nix develop --command xvfb-run -a ruby test/drive_<name>.rb` for each of the
-four files.
+This is the number quoted for this round's gate (`drive_ok=true`, 99/99, 18
+components) and it was reproduced here by actually running each of the four
+files (`nix develop --command xvfb-run -a ruby test/drive_<name>.rb`), not
+taken on the round's word. `drive_window.rb`'s count rose from 36 (the
+number the last `test-parity` round recorded) to 41 because of the commit
+made since — `e191199` added five checks (12-17 cover "a real missing-plugin
+message reaches the window" through both `on_install_done` branches) that
+drive the install-plugin wiring `6f102ac` built. That addition is real: read
+`test/drive_window.rb:100-170` and it fires a genuine `GstPbutils`
+missing-decoder bus message through `Play`'s real messenger pub/sub, then
+calls `on_install_done` directly with the actual `GstPbutils::
+InstallPluginsReturn` enum values, rather than faking the result shape.
 
-`scripts/test-census.sh` (this skill) reports 124 rows for the port tree
-because it also collects the `step(...)` grouping labels (49 of them) as if
-they were assertions — they are not. Per this skill's Step 1 instruction to
-"find the call that increments the pass counter", `test/gtk_driver.rb:78`
-shows `check` is the only call that increments `@checks`; `step` only records
-a name for a sub-section of the driver's output. 94, from `check`, is the
-assertion count; 124 is a census-script overcount for this suite's shape and
-should not be reported as the test count.
+**This closes a gap the previous `test-parity` round named explicitly**: "the
+94/94 gate does not cover the install-plugin flow" is no longer true — it is
+covered now, by name, with its own five checks. The gap the previous round
+did not raise — multi-window architecture — is still uncovered: no drive
+script opens, or asserts the existence of, a second `Gtk::Window`. That is
+still a real coverage hole, not resolved by this round's work, and belongs
+with `.reports/component-parity.md`'s open gap #1.
 
-## The suite the dev shell tells you to run finds nothing
+## The suite the dev shell tells you to run still finds nothing
 
-The dev-shell banner (`nix develop`) prints three lines, one of them labelled
-"run the specs":
+Run verbatim this round, headless, under `xvfb-run`, exactly as the dev
+shell's own banner prints it:
 
 ```
-ruby -e 'require "rspec/core"; exit RSpec::Core::Runner.run(["--format", "progress", "--require", "spec_helper", "spec"])'
+nix develop --command xvfb-run -a ruby -e 'require "rspec/core"; exit RSpec::Core::Runner.run(["--format", "progress", "--require", "spec_helper", "spec"])'
 ```
-
-Run verbatim, headless, under `xvfb-run`:
 
 ```
 NOTE: kettle-test isn't installed; running with plain RSpec.
@@ -64,48 +64,52 @@ No examples found.
 0 examples, 0 failures
 ```
 
-`spec/` contains only `spec_helper.rb` (harness boilerplate) and `README.md`
-(prose describing helpers that no spec in this repository uses). There is no
-`spec/*_spec.rb` anywhere in the tree, `.rspec_status` is empty, and
-`showtime-rb.gemspec` declares no `rspec` test dependency. **The suite scaffold
-exists; the suite does not.** The dev shell's own banner names a test command
-whose current, actual, run result is zero examples — that is a documentation
-gap, and one this skill is specifically built to catch: a command that "exists"
-and produces nothing is not a safety net, and advertising it as "run the specs"
-without a single spec in the repository is the kind of false-green claim
-`accountability-ensurance` also flags (see that report).
+`spec/` still contains only `spec_helper.rb` (harness boilerplate) and
+`README.md` (prose describing helpers no spec in the repository uses). There
+is still no `spec/*_spec.rb` anywhere in the tree. **This is unchanged from
+the previous round and was not addressed by either of the two commits made
+since** — both of those commits added coverage to `test/drive_window.rb`,
+the ad hoc headless harness, not to `spec/`. The dev shell's own banner
+names a test command whose actual run result is zero examples; that gap is
+still live, and advertising it as "run the specs" is still the kind of
+false-green surface `accountability-ensurance` flags independently.
 
-## Extra
+## Extra: what the port's real suite covers, unmapped to any upstream test
 
-All of the port's actual, runnable verification lives here, outside the 0/0
-count because none of it maps to an upstream test:
-
-- `test/drive_mpris.rb` — 16 checks on the MPRIS2 D-Bus surface: Raise,
-  Identity/DesktopEntry, CanPlay/CanSeek/CanRaise, LoopStatus, rate bucketing,
-  introspection XML, GetAll, and that an unknown method or a call with nothing
-  loaded returns a DBus error / no-op instead of crashing.
+- `test/drive_mpris.rb` — 16 checks on the MPRIS2 D-Bus surface.
 - `test/drive_placeholder.rb` — 16 checks on the welcome/error/missing-plugin
-  states, the primary menu, the shortcuts and about dialogs, and the
-  fullscreen action/accelerators.
-- `test/drive_window.rb` — 36 checks on the window shell: both stack pages,
-  every `win.*`/`app.*` action's presence and accelerators, the idle
-  inhibitor, the drag-and-drop target, loop persistence to settings, and
-  switching between the welcome and video pages.
-- `test/drive_video_widgets.rb` — 26 checks on the four widgets the video
-  page assembles: the drag overlay, sound-options popover (volume-icon
-  thresholds), options popover (language/subtitle submenus, rate toggle
-  group, rotation), and the restore overlay (resume/restart).
-- `test/gtk_driver.rb` — the shared harness (`step`/`check`/screenshot
-  machinery); not itself a test file.
+  states (message selection only — see below), the primary menu, the
+  shortcuts and about dialogs, fullscreen action/accelerators.
+- `test/drive_video_widgets.rb` — 26 checks on the drag overlay, sound
+  options, options popover, and restore overlay.
+- `test/drive_window.rb` — 41 checks on the window shell: both stack pages,
+  every `win.*`/`app.*` action's presence and accelerator, the idle
+  inhibitor, drag-and-drop, loop persistence, welcome/video page switching,
+  and (new this round) the real missing-plugin → install-result path.
+- `test/gtk_driver.rb` — the shared harness; not itself a test file.
+
+Still true, re-checked this round: `drive_placeholder.rb`'s own missing-plugin
+checks exercise message *selection* only (they hand-construct an `on_install`
+callback rather than going through `Window`'s real wiring) — that coverage
+gap is now filled by `drive_window.rb` instead, so it is no longer an
+uncovered gap overall, just covered by a different file than the one that
+originally claimed to test it. Worth naming so a future reader does not
+assume `drive_placeholder.rb` covers the install flow when it is
+`drive_window.rb` that actually does.
 
 No file in `test/` or `lib/` exercises `Showtime::Translations` end-to-end
 (loading a non-English `.po` and asserting a translated string reaches a
-widget) — see `.reports/translation-parity.md` for why that check could not
-be run either.
+widget on screen) — unchanged from the previous round. See
+`.reports/translation-parity.md`.
 
 ## Rules check
 
 - Counts equal: 0 upstream, 0 ported → trivially equal. ✓
-- Suite actually runs: the port's own drive suite does (94/94, reproduced
-  above); the suite the project's own tooling calls "the specs" does not (0
-  examples). Both facts are reported; neither is hidden behind the other.
+- Suite actually runs: the port's own drive suite does (99/99, reproduced
+  this round under `xvfb-run`, not assumed from the harness notification);
+  the suite the project's own tooling calls "the specs" does not (0
+  examples, reproduced this round too). Both facts are reported; neither is
+  hidden behind the other.
+- A suite that has never been executed is named as a gap, not folded into
+  "passing": `spec/` is reported as 0/0 run, not omitted because `test/`
+  looks healthy.

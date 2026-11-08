@@ -3,90 +3,117 @@
 | | |
 |---|---|
 | Upstream | `main` @ `f28a1d4` |
-| Port | `ruby` @ `47105ff` |
-| Units with full (4-axis) parity | 15 / 18 |
-| Units with an open gap | 3 / 18 — #1 `application.rb`, #4 `placeholder_page.rb` (install-plugin flow), #5/#3 `window.rb` (retry-in-place, no second window) |
+| Port | `ruby` @ `e191199` |
+| Units with full (4-axis) parity | 16 / 18 |
+| Units with an open gap | 2 / 18 — #1/#3/#5 `application.rb`/`window.rb` (single-window architecture), and a gap this report's unit list previously had no row for at all: upstream's `data/` directory (desktop entry, AppStream metainfo, GSettings schema) has no port counterpart |
 
-This builds on the unit inventory already written in
-`.reports/component-inventory.md` (the `component-identification` output),
-re-checked unit by unit against the four axes: count, style, behaviour, text.
-The text axis is covered in full by `.reports/translation-parity.md`'s
-hand-census and is summarized per unit below rather than repeated.
+This builds on `.reports/component-inventory.md` and the prior round's
+`component-parity` (written at `ruby` @ `47105ff`), re-checked unit by unit
+against the four axes (count, style, behaviour, text) after the two commits
+made since: `6f102ac` (ports the missing-plugin Install flow) and `e191199`
+(drives it for real in `test/drive_window.rb`).
 
-## Units with parity (15)
+## What changed since the last round: the install-plugin gap is now closed
 
-Units 2, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17 are unchanged from the
-component-identification report's "exists, mounted, driven" findings, and the
-text-axis census confirms every string each one shows is marked and
-byte-identical (primary menu's 6 items, shortcuts dialog's 19 strings, sound
-options, playback options, drag overlay, About dialog, utils, MPRIS, style,
-settings, icons). Unit 18 (translations) is the mechanism, not a widget, and
-is covered in full by `.reports/translation-parity.md`.
-
-Unit 11 (About dialog) and unit 6 (restore overlay) both pass all four axes
-including text — see the translation report's hand-census.
-
-## Unit 1: `showtime/main.py` → `lib/showtime/application.rb` — partial
+The previous round's two named gaps for unit 3/5 (`window.rb`) were
+retry-in-place and the install-plugin flow. The second is now built and
+verified, not just claimed:
 
 | Behaviour | Upstream | Port | Verdict |
 |---|---|---|---|
-| `HANDLES_OPEN` / `open` signal for CLI file args | `main.py:` `flags=HANDLES_OPEN`, `do_open` | `Gtk::Application.new(APP_ID, :handles_open)` (`application.rb:76`) | parity |
-| `--new-window`/`-n` + `[VIDEO FILES]` | `main.py:59-64` | `application.rb:77-79` | parity |
-| `handle-local-options` re-presenting a running instance | `main.py:` `do_handle_local_options` | `application.rb:57`, `:149-160` | parity |
-| Idle inhibitor while playing | `app.inhibit_win`/`uninhibit_win` | `window.rb:171-192`, held on `@app` | parity (correspondence: moved onto `Window`, noted in both files' comments) |
-| `playback_history.json` save/restore | `main.py` writes it; `settings.rb` defines `HISTORY_FILE` | `window.rb:113-114`, `:475`, `:522` call `save_current_play_position` on close | parity |
-| `Gst.init()` | `main.py` | `play.rb:` idempotent in `Play#build` | parity |
-| **One OS window per video file**, `do_open` calling `do_activate` once per `GFile` | `main.py` opens N windows for N CLI args | `Window` is a memoized singleton per `Application`; N CLI args play the last file in the one window | **gap** |
+| Install-plugin flow: `Gtk.Button` → PackageKit install → "Installing…" toast → re-probe | `window.py:795-850` | `window.rb:445-494` (`on_missing_plugin` → `install_callback` → `install_plugin` → `on_install_done`), `placeholder_page.rb`'s `button_row` gains `disable_on_activate` so a second click can't race the first install | **parity** |
 
-Six of the seven behaviours the component-identification report once listed
-as missing for this unit are now built and wired (re-verified here by reading
-`application.rb` and `window.rb` directly, not by trusting that report's
-older text — see the stale-section warning at the top of
-`.reports/component-inventory.md`). The seventh, multi-window-per-launch, is
-still missing, and `.reports/accountability-ensurance.md` has the finding on
-how it is described in the source.
+Verified three ways, not one:
+1. Read `window.rb:445-494` directly — `install_callback` gates on
+   `GstPbutils.install_plugins_supported`, `install_plugin` calls
+   `GstPbutils.install_plugins_async` with the real installer detail and
+   shows `Translations.translate("Installing…")` as a toast, and
+   `on_install_done` has the same three-way branch upstream's
+   `window.py:815-830` has (success → `Gst.update_registry` + `try_again`;
+   `NOT_FOUND` → "no plugin available" message; anything else → "install
+   failed" message).
+2. Read `placeholder_page.rb` — the button row only renders when
+   `on_install` is non-nil, and `install_callback` now returns a real
+   lambda whenever `GstPbutils.install_plugins_supported` is true, so the
+   button appears on the systems upstream would show it on, not on none.
+3. Ran `test/drive_window.rb` myself (`nix develop --command xvfb-run -a
+   ruby test/drive_window.rb`) — checks 12-17 fire a genuine
+   `GstPbutils` missing-decoder bus message through `Play`'s messenger (the
+   same path `wire_play` registers in production) and drive
+   `on_install_done`'s `NOT_FOUND`/`ERROR` branches with the real enum
+   values `install_plugins_async`'s callback would hand them (this Xvfb
+   environment has no PackageKit installer to actually call async against,
+   which the drive script says plainly rather than faking a pass around
+   it). Result: `41 of 41 checks passed`, `DRIVE OK`.
 
-## Unit 3/5: `window.py`/`window.blp` → `window.rb`/`video_page.rb` — two named gaps
+## Gap #1 (carried over, still open): single-window architecture
 
-| Widget / behaviour | Upstream | Port | Verdict |
+| Behaviour | Upstream | Port | Verdict |
 |---|---|---|---|
-| Every `win.*`/`app.*` action (21) | `window.py` `_create_action` × 18 + `main.py` × 3 | `window.rb` creates 18, `application.rb` creates 3 — `drive_window.rb` asserts the name and accelerator of all 21 by iterating the real action group | parity |
-| `Gtk.FileDialog` × 3 (open video, subtitles, screenshot save) | `window.py` | `window.rb:270` (video), `:279` (subtitles), screenshot dialog built at the capture call site | parity |
-| Retrying a failed stream opens a fresh attempt | `window.py:883-888`: `_try_again` calls `Application.do_activate(gfile)` — which **always constructs a brand-new `Window`** (`main.py:137-139`, no reuse check) — then closes the failing one | `window.rb`'s `_try_again` replays the file in the same, single, memoized `Window` instance | **gap** — verified by reading `do_activate`, which has no "reuse the existing window" branch at all; every upstream activation (first launch, `new-window`, retry-after-error, each CLI file argument) opens a distinct `Window`, and the port's single-window architecture diverges from all four, not just the CLI-file-arguments case the component-identification report already named |
-| Install-plugin flow: `Gtk.Button` → PackageKit install → "Installing…" toast → re-probe | `window.py:825-850`, `placeholder_page.rb`'s equivalent `_present_install_plugin` region | `on_install` is always `nil` (`window.rb:31-33`); `placeholder_page.rb:148` only ever renders the button when `on_install` is truthy, so the button, the toast, and the re-probe never appear | **gap** |
+| Every OS-window-opening action (`new-window`, each CLI file arg, retry-after-error) opens a **new** `Window` | `main.py:do_activate` has no reuse branch; `window.py:883-888`'s `_try_again` calls `do_activate` then closes the old window | `Window` is a single instance memoized per `Application`; `new-window`, CLI args, and retry all re-present/replay the same one | **gap** |
 
-The install-plugin gap is real and user-visible: on a system missing a
-GStreamer plugin, upstream offers an "Install Plugin" button that drives
-PackageKit and shows an "Installing…" toast; the port always falls through to
-the "could not be found" wording instead, for every system, including ones
-where installing the plugin would have worked. See
-`.reports/accountability-ensurance.md` for how this is currently described in
-`window.rb`'s own comment, which is the more serious finding.
+Unchanged from the last round. `window.rb`'s own class comment now states
+this accurately (no "intentionally" framing — see
+`.reports/accountability-ensurance.md` for what changed and why it matters)
+but the behaviour itself is not built. A user who opens a second video via
+`new-window` while one is already playing gets the window re-presented, not
+a second window with the first video still playing in its own window, which
+is upstream's actual behaviour.
 
-## Unit 4: `placeholder_page.rb` — same install-plugin gap, from the other widget
+## Gap #2 (new to this report, previously under-named): `data/` has no port counterpart
 
-`PlaceholderPage#show_missing_plugin` is the widget-side half of the gap
-above: its three described states (full install flow / partial "try anyway" /
-no installer) collapse to one in practice, because the caller never passes an
-`on_install` callback. The widget code itself is otherwise complete — the
-"codecs are required"/"codecs could not be found"/"no plugin available"
-three-way message selection all exist and are driven by
-`test/drive_placeholder.rb`'s two checks (`the description names the codec`,
-`a system with no plugin installer gets the other message`) — but those two
-checks only exercise the *message selection*, never the install button,
-because nothing in the test harness supplies `on_install` either. The 94/94
-drive-check gate therefore does not cover this gap; see
-`.reports/test-parity.md`.
+Upstream ships three non-code files this port has no equivalent for at all:
+
+| File | Purpose | Port |
+|---|---|---|
+| `data/org.gnome.Showtime.desktop.in` | Desktop launcher entry (name, exec, icon, keywords) | — none |
+| `data/org.gnome.Showtime.metainfo.xml.in` | AppStream metadata (description, screenshots, release notes) | — none |
+| `data/org.gnome.Showtime.gschema.xml.in` | GSettings schema definitions | — none (`settings.rb` is a JSON-backed shim with the same key names, not the schema file itself) |
+
+This was previously folded entirely into `.reports/translation-parity.md`'s
+8-message gap count and a one-line "not components" mention in
+`component-inventory.md`, with no row of its own in either inventory or
+parity report. That undercounts its scope: it is not only a translation
+gap (10 lost msgids), it is a missing deliverable in its own right — no
+`.desktop` entry means the app has no discoverable launcher metadata, and
+no `.metainfo.xml.in` means no AppStream listing. The house pattern this
+fork should be following ships these: the pilot port, `gnome-contacts-rb`,
+has its own `data/org.gnome.ContactsRb.desktop.in.in` and
+`.metainfo.xml.in.in` (confirmed by listing that repo's `data/` directory
+directly). `showtime-rb`'s `data/` directory contains only the icon SVGs.
+
+## Units with parity (16)
+
+Units 2, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 are unchanged from the
+last round's "exists, mounted, driven, text matches" findings. Two items the
+last round's inventory left as open "needs a closer read" questions are now
+closed, re-verified this round by reading the code rather than carrying the
+open question forward again:
+
+- `app.shortcuts` is installed on the application (`application.rb:117`),
+  not shadowed by any window-level action of the same name — confirmed by
+  grepping every `lib/showtime/*.rb` file for the string `"shortcuts"` as an
+  action name; one hit.
+- `Window`'s upstream `rate` `GObject.Property` setter (pops the options
+  popover down, emits `rate-changed`) is reproduced across
+  `Options#rate=` (`options.rb:85-90`, does the popdown) and
+  `Application#rate=`/MPRIS's `Rate` property-set branch
+  (`application.rb:105-106`, `mpris.rb:242-243`) — same net effect, split
+  differently across files, verified by reading all three rather than
+  trusting the "split differently" framing on its own.
+- `style.rb`'s CSS is byte-identical to upstream's `style.css` (diffed, not
+  eyeballed — see `component-identification`).
+
+Unit 18 (translations) is the mechanism, not a widget, and is covered in
+full by `.reports/translation-parity.md`.
 
 ## Rules check against this skill
 
-- Reported per unit, not as an app-wide total: the three open units are named,
-  not folded into "15/18 roughly fine".
-- No correspondence asserted without a location: every "parity" row above
-  cites the file/line checked, including `do_activate`'s absence of any
-  window-reuse branch, which is the fact the "retry-in-place" gap rests on.
-- The single-window architecture is one root cause surfacing as three
-  separate rows (unit 1's multi-window-per-launch, unit 3/5's retry-in-place,
-  and the `new-window` action re-presenting instead of opening a second
-  window) — recorded as three rows because each is a distinct behaviour a
-  user can trigger, not collapsed into one to make the ledger shorter.
+- Reported per unit, not as an app-wide total: two open units are named,
+  not folded into "16/18 roughly fine".
+- Every "parity" row cites what was read or run, including re-running
+  `test/drive_window.rb` this round rather than reusing the prior round's
+  number.
+- The newly-named `data/` gap is reported as its own row with its own
+  evidence (the pilot port's `data/` directory), not merged into the
+  translation report's count where it was previously easy to miss.
